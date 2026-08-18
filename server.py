@@ -1306,7 +1306,15 @@ class Handler(BaseHTTPRequestHandler):
     def log_message(self, *_): pass
     def cors_origin(self):
         origin = self.headers.get("Origin", "")
-        return origin if origin in ALLOWED_ORIGINS else None
+        if origin in ALLOWED_ORIGINS:
+            return origin
+        # tauri dev serves the frontend from a loopback dev server (http://127.0.0.1:<port>);
+        # the port is chosen at launch, so allow any loopback origin. The backend only
+        # listens on 127.0.0.1 and /api/* still requires the per-launch token.
+        parsed = urlparse(origin)
+        if parsed.scheme in ("http", "https") and parsed.hostname in ("127.0.0.1", "localhost", "::1"):
+            return origin
+        return None
     def send_cors_headers(self):
         origin = self.cors_origin()
         if origin:

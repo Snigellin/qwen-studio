@@ -99,3 +99,9 @@
 /* General chats live beside project threads in the sidebar. */
 .general-thread-group { display: grid; gap: 2px; padding: 2px 0 7px; }
 .general-thread-heading { padding: 6px 9px 4px; color: #8a8a90; font-size: 9px; font-weight: 600; letter-spacing: .1em; }
+/* Text inputs inside settings groups (e.g. busy-process names) match the number inputs' look. */
+.settings-group input[type="text"] { width: 100%; border: 1px solid #dcdce0; border-radius: 6px; padding: 7px 8px; background: #fff; color: var(--q-ink, #202123); font: inherit; font-size: 12px; }
+.settings-group input[type="text"]:focus { outline: 0; border-color: var(--q-accent, #2457e6); }
+/* Keep settings rows horizontal: the generic .settings-list div rule (flex) would otherwise override the two-column grid. */
+.settings-list .settings-group { display: grid; grid-template-columns: minmax(120px, 1fr) minmax(170px, 1.4fr); align-items: center; gap: 5px 14px; }
+.settings-group input#busy-processes { grid-column: 2; }

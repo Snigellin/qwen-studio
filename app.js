@@ -1,10 +1,11 @@
 const state = { history: [], mode: 'fast', profiles: {}, supervisor: {}, recoveryJobs: [], currentView: 'chat', running: false, runtimeReady: false, activeJobId: null, activeRunCard: null, queuedDirections: [], steering: false, terminalRun: null, terminalHistory: [], terminalHistoryIndex: 0, terminalTranscript: '', project: null, threadId: null, threadProjectId: null, pendingAttachments: [] };
+const t = window.qwenI18n.t;
 const $ = selector => document.querySelector(selector);
 const $$ = selector => [...document.querySelectorAll(selector)];
 const messages = $('#messages');
 const prompt = $('#prompt');
 const intro = $('#intro');
-const modeNames = { fast: 'Fast', balanced: 'Balanced', deep: 'Deep' };
+const modeNames = { fast: t('Fast'), balanced: t('Balanced'), deep: t('Deep') };
 
 function showNotice(text, kind = 'error') {
   const notice = $('#app-notice'); if (!notice) return;
@@ -15,7 +16,7 @@ function showNotice(text, kind = 'error') {
 function renderMode() {
   const label = modeNames[state.mode] || modeNames.fast;
   const context = Number(state.profiles?.[state.mode]?.num_ctx || ({ fast: 32768, balanced: 65536, deep: 131072 }[state.mode]));
-  $('#mode').textContent = `${label} · ${Math.round(context / 1024)}K`;
+  $('#mode').textContent = t('mode.label', { label, ctx: Math.round(context / 1024) });
   $('#settings-mode').textContent = label;
   $('#settings-profile-context').textContent = `${context.toLocaleString()} tokens`;
 }
@@ -24,7 +25,7 @@ function showView(view) {
   state.currentView = view;
   $$('.view').forEach(item => item.classList.toggle('active', item.id === `${view}-view`));
   $$('.nav-link[data-view]').forEach(item => item.classList.toggle('active', item.dataset.view === view));
-  $('#breadcrumb').textContent = view === 'mcps' ? 'MCP connections' : view === 'workspace' ? 'Projects' : view[0].toUpperCase() + view.slice(1);
+  $('#breadcrumb').textContent = view === 'mcps' ? t('MCP connections') : view === 'workspace' ? t('Projects') : view === 'settings' ? t('Settings') : t('Chats');
   if (view === 'mcps') refreshMcps();
   if (view === 'workspace') refreshProjects();
 }
@@ -38,7 +39,7 @@ function updateComposerAvailability() {
   const send = $('#send');
   if (!send || state.running) return;
   send.disabled = !state.runtimeReady;
-  send.title = state.runtimeReady ? '' : 'Waiting for Ollama and the selected model';
+  send.title = state.runtimeReady ? '' : t('Waiting for Ollama and the selected model');
 }
 
 async function loadStatus() {
@@ -54,33 +55,36 @@ async function loadStatus() {
     state.supervisor = data.supervisor || state.supervisor;
     renderMode();
     renderSupervisor();
-    $('#active-project-name').textContent = data.project?.name || 'No project';
-    $('#settings-capabilities').textContent = (data.runtime?.capabilities || []).join(', ') || 'Not reported';
+    $('#active-project-name').textContent = data.project?.name || t('No project');
+    const capabilityNames = { completion: t('capabilities.completion'), vision: t('capabilities.vision'), tools: t('capabilities.tools'), thinking: t('capabilities.thinking') };
+    $('#settings-capabilities').textContent = (data.runtime?.capabilities || []).map(name => capabilityNames[name] || name).join(', ') || t('Not reported');
     $('#settings-native-context').textContent = data.runtime?.nativeContext ? `${Number(data.runtime.nativeContext).toLocaleString()} tokens` : 'Not reported';
     state.runtimeReady = Boolean(data.runtime?.available);
     const runtimeState = data.runtime?.state || (state.runtimeReady ? 'ready' : 'offline');
-    const runtimeLabel = state.runtimeReady ? 'Local runtime ready' : runtimeState === 'model-missing' ? 'Model not installed' : 'Starting Ollama…';
-    $('#settings-runtime').textContent = state.runtimeReady ? 'Connected' : runtimeState === 'model-missing' ? 'Model missing' : 'Starting…';
+    const runtimeLabel = state.runtimeReady ? t('Local runtime ready') : runtimeState === 'model-missing' ? t('Model not installed') : t('Starting Ollama…');
+    $('#settings-runtime').textContent = state.runtimeReady ? t('Connected') : runtimeState === 'model-missing' ? t('Model missing') : t('Starting…');
     setConnected(state.runtimeReady, runtimeLabel, state.runtimeReady ? 'ready' : runtimeState === 'model-missing' ? 'offline' : 'starting');
     updateComposerAvailability();
     if (!state.runtimeReady && !loadStatus.runtimeNoticeShown) {
-      showNotice(runtimeState === 'model-missing' ? `${data.model} is not installed. Run “ollama pull ${data.model}” once, then Qwen Studio will connect automatically.` : `Starting Ollama for ${data.model}. The app will become ready automatically when the model is available.`, 'error');
+      showNotice(runtimeState === 'model-missing' ? t('notice.modelMissing', { model: data.model }) : t('notice.startingModel', { model: data.model }), 'error');
       loadStatus.runtimeNoticeShown = true;
     }
     if (state.runtimeReady) loadStatus.runtimeNoticeShown = false;
     refreshRecoveryJobs();
-  } catch { state.runtimeReady = false; setConnected(false, 'Starting local backend…', 'starting'); updateComposerAvailability(); }
+  } catch { state.runtimeReady = false; setConnected(false, t('Starting local backend…'), 'starting'); updateComposerAvailability(); }
 }
 
 function ensureResourceControls() {
   const list = $('.settings-list');
   if (!list || $('#idle-only')) return;
   const group = document.createElement('div'); group.className = 'settings-group';
-  const title = document.createElement('span'); title.textContent = 'Idle-only continuation';
+  const title = document.createElement('span'); title.setAttribute('data-i18n', 'Idle-only continuation'); title.textContent = t('Idle-only continuation');
+  const toggleLabel = document.createElement('label'); toggleLabel.className = 'switch';
   const toggle = document.createElement('input'); toggle.id = 'idle-only'; toggle.type = 'checkbox'; toggle.addEventListener('change', async event => { try { await setSupervisorSettings({ idleOnly: event.currentTarget.checked }); } catch (error) { event.currentTarget.checked = !event.currentTarget.checked; showNotice(error.message); } });
-  const hint = document.createElement('small'); hint.textContent = 'Optionally wait while configured game/heavy-process names are running.';
-  const processes = document.createElement('input'); processes.id = 'busy-processes'; processes.placeholder = 'Busy process names, comma-separated'; processes.addEventListener('change', async event => { try { await setSupervisorSettings({ busyProcesses: event.currentTarget.value }); } catch (error) { showNotice(error.message); } });
-  group.append(title, toggle, processes, hint); list.append(group);
+  toggleLabel.append(toggle, document.createElement('span'));
+  const hint = document.createElement('small'); hint.setAttribute('data-i18n', 'Optionally wait while configured game/heavy-process names are running.'); hint.textContent = t('Optionally wait while configured game/heavy-process names are running.');
+  const processes = document.createElement('input'); processes.type = 'text'; processes.id = 'busy-processes'; processes.setAttribute('data-i18n-placeholder', 'Busy process names, comma-separated'); processes.placeholder = t('Busy process names, comma-separated'); processes.addEventListener('change', async event => { try { await setSupervisorSettings({ busyProcesses: event.currentTarget.value }); } catch (error) { showNotice(error.message); } });
+  group.append(title, toggleLabel, processes, hint); list.append(group);
 }
 
 function renderSupervisor() {
@@ -95,7 +99,7 @@ function renderSupervisor() {
   const status = $('#supervisor-status');
   if (status) {
     const usage = data.effectiveMethod === 'api' ? ` · ${Number(data.usageRuns || 0)} reviews today · ~$${Number(data.usageEstimatedUsd || 0).toFixed(2)} estimated` : '';
-    status.textContent = available ? `${data.effectiveMethod === 'api' ? 'API-key mode (metered)' : 'Codex login'} · ${enabled ? 'enabled' : 'ready to enable'} · ${Number(data.maxRunsPerJob || 0)} reviews/job${usage}` : 'Codex CLI unavailable; install/login before enabling.';
+    status.textContent = available ? `${data.effectiveMethod === 'api' ? t('API-key mode (metered)') : t('Codex login')} · ${enabled ? t('enabled') : t('ready to enable')} · ${Number(data.maxRunsPerJob || 0)} reviews/job${usage}` : t('Codex CLI unavailable; install/login before enabling.');
   }
   const mode = $('#supervisor-mode'); if (mode && data.mode) mode.value = data.mode;
   const budget = $('#supervisor-budget'); if (budget && data.dailyBudgetUsd != null) budget.value = data.dailyBudgetUsd;
@@ -109,7 +113,7 @@ function renderSupervisor() {
 async function setSupervisorSettings(changes) {
   const response = await fetch('/api/supervisor', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(changes) });
   const data = await response.json();
-  if (!response.ok) throw new Error(data.error || 'Supervisor settings could not be saved.');
+  if (!response.ok) throw new Error(data.error || t('Supervisor settings could not be saved.'));
   state.supervisor = data.status || state.supervisor; renderSupervisor();
 }
 
@@ -120,14 +124,14 @@ async function refreshRecoveryJobs() {
     const jobs = (data.items || []).filter(job => !job.dismissed && ['interrupted', 'error', 'stopped', 'blocked'].includes(job.status)).slice(0, 5);
     state.recoveryJobs = jobs; banner.hidden = !jobs.length; banner.innerHTML = '';
     if (!jobs.length) return;
-    const heading = document.createElement('strong'); heading.textContent = 'Work that can be resumed'; banner.append(heading);
-    const copy = document.createElement('p'); copy.textContent = 'Qwen Studio saved these jobs. Resume from the latest checkpoint and current files.'; banner.append(copy);
+    const heading = document.createElement('strong'); heading.textContent = t('Work that can be resumed'); banner.append(heading);
+    const copy = document.createElement('p'); copy.textContent = t('Qwen Studio saved these jobs. Resume from the latest checkpoint and current files.'); banner.append(copy);
     jobs.forEach(job => {
       const row = document.createElement('div'); row.className = 'recovery-row';
-      const text = document.createElement('span'); text.textContent = `${job.activity || 'Previous job'} · ${job.status}`;
+      const text = document.createElement('span'); text.textContent = `${job.activity || t('Previous job')} · ${job.status}`;
       const actions = document.createElement('div'); actions.className = 'recovery-actions';
-      const button = document.createElement('button'); button.type = 'button'; button.textContent = 'Resume'; button.addEventListener('click', () => resumeJob(job));
-      const dismiss = document.createElement('button'); dismiss.type = 'button'; dismiss.className = 'text-button'; dismiss.textContent = 'Dismiss'; dismiss.addEventListener('click', async () => { await fetch(`/api/jobs/${job.id}/dismiss`, { method: 'POST' }); refreshRecoveryJobs(); });
+      const button = document.createElement('button'); button.type = 'button'; button.textContent = t('Resume'); button.addEventListener('click', () => resumeJob(job));
+      const dismiss = document.createElement('button'); dismiss.type = 'button'; dismiss.className = 'text-button'; dismiss.textContent = t('Dismiss'); dismiss.addEventListener('click', async () => { await fetch(`/api/jobs/${job.id}/dismiss`, { method: 'POST' }); refreshRecoveryJobs(); });
       actions.append(button, dismiss); row.append(text, actions); banner.append(row);
     });
   } catch { banner.hidden = true; }
@@ -136,14 +140,14 @@ async function refreshRecoveryJobs() {
 async function resumeJob(job) {
   if (state.running) return;
   if (job.threadId) await openThread(job.threadId);
-  state.running = true; state.activeJobId = job.id; $('#send').disabled = false; $('#send').textContent = 'Steer'; $('#mode').disabled = true;
+  state.running = true; state.activeJobId = job.id; $('#send').disabled = false; $('#send').textContent = t('Steer'); $('#mode').disabled = true;
   const card = addRunStatus(); state.activeRunCard = card;
   try {
     const response = await fetch(`/api/jobs/${job.id}/resume`, { method: 'POST' }); const data = await response.json();
-    if (!response.ok) throw new Error(data.error || 'The job could not be resumed.');
+    if (!response.ok) throw new Error(data.error || t('The job could not be resumed.'));
     await watchJob(data.jobId || job.id, card); await refreshThreads();
-  } catch (error) { finishRunCard(card, 'Stopped', true); addMessage('assistant', `Resume error: ${error.message}`); }
-  finally { state.running = false; state.activeJobId = null; state.activeRunCard = null; $('#send').disabled = false; $('#send').textContent = 'Send'; $('#mode').disabled = false; renderSupervisor(); refreshRecoveryJobs(); }
+  } catch (error) { finishRunCard(card, 'Stopped', true); addMessage('assistant', t('Resume error:') + ' ' + error.message); }
+  finally { state.running = false; state.activeJobId = null; state.activeRunCard = null; $('#send').disabled = false; $('#send').textContent = t('Send'); $('#mode').disabled = false; renderSupervisor(); refreshRecoveryJobs(); }
 }
 
 function clearThreadSurface() {
@@ -167,7 +171,7 @@ async function openThread(threadId) {
   state.history.forEach(item => addMessage(item.role, item.content, item.attachments));
   $$('.thread-row').forEach(item => item.classList.toggle('active', item.querySelector('.thread-item')?.dataset.threadId === thread.id));
   showView('chat');
-  $('#active-project-name').textContent = thread.projectId ? (state.project?.name || 'Project chat') : 'General chat';
+  $('#active-project-name').textContent = thread.projectId ? (state.project?.name || t('Project chat')) : t('General chat');
   prompt.focus();
 }
 
@@ -197,12 +201,12 @@ async function refreshThreads(openLatest = false) {
     const generalThreads = data.items.filter(thread => !thread.projectId);
     if (generalThreads.length) {
       const general = document.createElement('section'); general.className = 'general-thread-group';
-      const heading = document.createElement('div'); heading.className = 'general-thread-heading'; heading.textContent = 'GENERAL CHATS'; general.append(heading);
+      const heading = document.createElement('div'); heading.className = 'general-thread-heading'; heading.textContent = t('GENERAL CHATS'); general.append(heading);
       const chats = document.createElement('div'); chats.className = 'project-chat-list';
       generalThreads.forEach(thread => appendThreadRow(chats, thread));
       general.append(chats); list.append(general);
     }
-    if (!projects.items.length && !generalThreads.length) { list.innerHTML = '<p>No chats yet. Start a general chat or create a project.</p>'; return; }
+    if (!projects.items.length && !generalThreads.length) { list.innerHTML = '<p>' + t('No chats yet. Start a general chat or create a project.') + '</p>'; return; }
     projects.items.forEach(project => {
       const projectThreads = data.items.filter(thread => thread.projectId === project.id);
       const group = document.createElement('section'); group.className = `project-thread-group ${project.id === projects.active ? 'active' : ''}`;
@@ -211,11 +215,11 @@ async function refreshThreads(openLatest = false) {
       const icon = document.createElement('span'); icon.dataset.icon = 'folder'; const name = document.createElement('span'); name.textContent = project.name;
       const count = document.createElement('small'); count.textContent = String(projectThreads.length); projectButton.append(icon, name, count);
       projectButton.addEventListener('click', () => activateProject(project.id, true));
-      const add = document.createElement('button'); add.type = 'button'; add.className = 'project-chat-add'; add.title = `New chat in ${project.name}`; add.dataset.icon = 'plus';
+      const add = document.createElement('button'); add.type = 'button'; add.className = 'project-chat-add'; add.title = t('New chat') + ' — ' + project.name; add.dataset.icon = 'plus';
       add.addEventListener('click', async () => { if (state.project?.id !== project.id && !(await activateProject(project.id, false))) return; await createChat(project.id); });
       head.append(projectButton, add); group.append(head);
       const chats = document.createElement('div'); chats.className = 'project-chat-list';
-      if (!projectThreads.length) { const empty = document.createElement('p'); empty.textContent = 'No chats yet'; chats.append(empty); }
+      if (!projectThreads.length) { const empty = document.createElement('p'); empty.textContent = t('No chats yet'); chats.append(empty); }
       projectThreads.forEach(thread => {
         appendThreadRow(chats, thread, project.id);
       });
@@ -223,24 +227,24 @@ async function refreshThreads(openLatest = false) {
     });
     const activeThreads = data.items.filter(thread => thread.projectId === projects.active);
     if (openLatest && activeThreads.length) await openThread(activeThreads[0].id);
-  } catch { list.innerHTML = '<p>Projects and chats could not be loaded.</p>'; }
+  } catch { list.innerHTML = '<p>' + t('Projects and chats could not be loaded.') + '</p>'; }
 }
 
 function appendThreadRow(container, thread, projectId = null) {
   const row = document.createElement('div'); row.className = `thread-row ${thread.id === state.threadId ? 'active' : ''}`;
   const button = document.createElement('button'); button.type = 'button'; button.className = 'thread-item'; button.dataset.threadId = thread.id;
-  const title = document.createElement('span'); title.textContent = thread.title || 'New chat';
-  const meta = document.createElement('small'); meta.textContent = `${thread.messageCount || 0} messages`;
+  const title = document.createElement('span'); title.textContent = thread.title || t('New chat');
+  const meta = document.createElement('small'); meta.textContent = `${thread.messageCount || 0} ${t('messages')}`;
   button.append(title, meta); button.addEventListener('click', () => projectId ? openProjectThread(projectId, thread.id) : openThread(thread.id));
   const actions = document.createElement('div'); actions.className = 'thread-actions';
-  const rename = document.createElement('button'); rename.type = 'button'; rename.title = 'Rename chat'; rename.dataset.icon = 'edit';
-  rename.addEventListener('click', async () => { const next = window.prompt('Rename chat', thread.title || 'New chat'); if (!next?.trim()) return; await fetch(`/api/threads/${thread.id}/rename`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title: next.trim() }) }); refreshThreads(); });
-  const archive = document.createElement('button'); archive.type = 'button'; archive.title = 'Archive chat'; archive.dataset.icon = 'archive';
+  const rename = document.createElement('button'); rename.type = 'button'; rename.title = t('Rename chat'); rename.dataset.icon = 'edit';
+  rename.addEventListener('click', async () => { const next = window.prompt(t('Rename chat'), thread.title || t('New chat')); if (!next?.trim()) return; await fetch(`/api/threads/${thread.id}/rename`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title: next.trim() }) }); refreshThreads(); });
+  const archive = document.createElement('button'); archive.type = 'button'; archive.title = t('Archive chat'); archive.dataset.icon = 'archive';
   archive.addEventListener('click', async () => { await fetch(`/api/threads/${thread.id}/archive`, { method: 'POST' }); if (state.threadId === thread.id) await createChat(); else refreshThreads(); });
-  const pin = document.createElement('button'); pin.type = 'button'; pin.title = thread.pinned ? 'Unpin chat' : 'Pin chat'; pin.dataset.icon = 'pin';
+  const pin = document.createElement('button'); pin.type = 'button'; pin.title = thread.pinned ? t('Unpin chat') : t('Pin chat'); pin.dataset.icon = 'pin';
   pin.addEventListener('click', async () => { await fetch(`/api/threads/${thread.id}/pin`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pinned: !thread.pinned }) }); refreshThreads(); });
-  const remove = document.createElement('button'); remove.type = 'button'; remove.title = 'Delete chat'; remove.dataset.icon = 'trash';
-  remove.addEventListener('click', async () => { if (!window.confirm('Delete this chat permanently?')) return; await fetch(`/api/threads/${thread.id}`, { method: 'DELETE' }); if (state.threadId === thread.id) await createChat(); else refreshThreads(); });
+  const remove = document.createElement('button'); remove.type = 'button'; remove.title = t('Delete chat'); remove.dataset.icon = 'trash';
+  remove.addEventListener('click', async () => { if (!window.confirm(t('Delete this chat permanently?'))) return; await fetch(`/api/threads/${thread.id}`, { method: 'DELETE' }); if (state.threadId === thread.id) await createChat(); else refreshThreads(); });
   actions.append(rename, pin, archive, remove); row.append(button, actions); container.append(row); window.renderQwenIcons(row);
 }
 
@@ -250,7 +254,7 @@ async function createChat(projectId = state.threadProjectId) {
   if (!response.ok) return null;
   const thread = await response.json();
   state.threadId = thread.id; state.threadProjectId = projectId; state.history = []; state.pendingAttachments = []; renderAttachmentTray(); clearThreadSurface(); intro.hidden = false; showView('chat');
-  $('#active-project-name').textContent = projectId ? (state.project?.name || 'Project chat') : 'General chat';
+  $('#active-project-name').textContent = projectId ? (state.project?.name || t('Project chat')) : t('General chat');
   await refreshThreads(); prompt.focus(); return thread;
 }
 
@@ -265,17 +269,17 @@ function attachmentVisual(attachment, removable = false) {
   if (attachment.kind === 'image' || attachment.kind === 'video') {
     const preview = document.createElement('img'); preview.alt = ''; item.append(preview);
     fetch(`/api/attachments/${attachment.id}/content`).then(response => {
-      if (!response.ok) throw new Error('Attachment preview unavailable.');
+      if (!response.ok) throw new Error(t('Attachment preview unavailable.'));
       return response.blob();
     }).then(blob => { preview.src = URL.createObjectURL(blob); }).catch(() => { preview.hidden = true; });
   } else {
-    const mark = document.createElement('span'); mark.className = 'attachment-kind'; mark.textContent = attachment.kind === 'text' ? 'TXT' : 'FILE'; item.append(mark);
+    const mark = document.createElement('span'); mark.className = 'attachment-kind'; mark.textContent = attachment.kind === 'text' ? t('TXT') : t('FILE'); item.append(mark);
   }
   const info = document.createElement('div'); const name = document.createElement('strong'); name.textContent = attachment.name;
   const meta = document.createElement('small'); meta.textContent = attachment.guidance || (attachment.kind === 'video' ? `${attachment.frameCount || 0} sampled frames · ${formatBytes(attachment.size)}` : `${attachment.kind} · ${formatBytes(attachment.size)}`);
   info.append(name, meta); item.append(info);
   if (removable) {
-    const remove = document.createElement('button'); remove.type = 'button'; remove.textContent = '×'; remove.setAttribute('aria-label', `Remove ${attachment.name}`);
+    const remove = document.createElement('button'); remove.type = 'button'; remove.textContent = '×'; remove.setAttribute('aria-label', t('Remove') + ' ' + attachment.name);
     remove.addEventListener('click', async () => { await fetch(`/api/attachments/${attachment.id}`, { method: 'DELETE' }); state.pendingAttachments = state.pendingAttachments.filter(entry => entry.id !== attachment.id); renderAttachmentTray(); }); item.append(remove);
   }
   return item;
@@ -289,7 +293,7 @@ function renderAttachmentTray() {
 async function ingestAttachmentPaths(paths) {
   if (!paths?.length) return;
   if (!state.threadId && !(await createChat())) return;
-  const button = $('#attach-files'); button.disabled = true; button.lastChild.textContent = ' Processing';
+  const button = $('#attach-files'); button.disabled = true; button.lastChild.textContent = ' ' + t('Processing');
   try {
     const response = await fetch('/api/attachments', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ paths, threadId: state.threadId }) });
     const data = await response.json();
@@ -297,7 +301,7 @@ async function ingestAttachmentPaths(paths) {
     if (data.errors?.length) {
       const error = document.createElement('div'); error.className = 'attachment-error'; error.textContent = data.errors.map(item => item.error).join(' '); $('#attachment-tray').append(error); $('#attachment-tray').hidden = false;
     }
-  } finally { button.disabled = false; button.lastChild.textContent = 'Attach'; }
+  } finally { button.disabled = false; button.lastChild.textContent = t('Attach'); }
 }
 
 async function chooseAttachments() {
@@ -318,7 +322,7 @@ function setTerminalRunning(running) {
   $('#terminal-input').disabled = running;
   $('#terminal-form button').disabled = running;
   $('#terminal-stop').hidden = !running;
-  $('#terminal-status').textContent = running ? 'Running' : 'Ready';
+  $('#terminal-status').textContent = running ? t('Running') : t('Ready');
   $('#terminal-status').classList.toggle('running', running);
 }
 
@@ -328,14 +332,14 @@ async function watchTerminal(runId, command) {
     await new Promise(resolve => setTimeout(resolve, 450));
     let response;
     try { response = await fetch(`/api/terminal/${runId}`); }
-    catch { $('#terminal-status').textContent = 'Reconnecting'; continue; }
-    if (!response.ok) throw new Error('The terminal process could not be loaded.');
+    catch { $('#terminal-status').textContent = t('Reconnecting'); continue; }
+    if (!response.ok) throw new Error(t('The terminal process could not be loaded.'));
     const run = await response.json();
     const current = `PS ${run.workspace}> ${command}\n${run.output || ''}`;
     output.textContent = state.terminalTranscript + current;
     output.scrollTop = output.scrollHeight;
     if (run.status !== 'running') {
-      const label = run.status === 'stopped' ? 'Stopped' : run.status === 'error' ? 'Failed' : `Exited ${run.exitCode}`;
+      const label = run.status === 'stopped' ? t('Stopped') : run.status === 'error' ? t('Failed') : t('Exited') + ' ' + run.exitCode;
       state.terminalTranscript += `${current}\n[${label}]\n`;
       output.textContent = state.terminalTranscript;
       state.terminalRun = null;
@@ -357,14 +361,14 @@ async function runTerminalCommand(command) {
   try {
     const response = await fetch('/api/terminal', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ command: command.trim() }) });
     const data = await response.json();
-    if (!response.ok) throw new Error(data.error || 'The command could not start.');
+    if (!response.ok) throw new Error(data.error || t('The command could not start.'));
     state.terminalRun = data.id;
     await watchTerminal(data.id, command.trim());
   } catch (error) {
     state.terminalRun = null;
     setTerminalRunning(false);
-    $('#terminal-status').textContent = 'Failed';
-    state.terminalTranscript += `PS> ${command.trim()}\nTerminal error: ${error.message}\n`;
+    $('#terminal-status').textContent = t('Failed');
+    state.terminalTranscript += `PS> ${command.trim()}\n${t('Terminal error:')} ${error.message}\n`;
     $('#terminal-output').textContent = state.terminalTranscript;
   }
 }
@@ -378,8 +382,8 @@ function renderAssistantContent(container, text) {
     }
     const block = document.createElement('section'); block.className = 'code-block';
     const head = document.createElement('header'); const language = document.createElement('span'); language.textContent = match[1] || 'code';
-    const copy = document.createElement('button'); copy.type = 'button'; copy.textContent = 'Copy';
-    copy.addEventListener('click', async () => { await navigator.clipboard.writeText(match[2]); copy.textContent = 'Copied'; setTimeout(() => { copy.textContent = 'Copy'; }, 1400); });
+    const copy = document.createElement('button'); copy.type = 'button'; copy.textContent = t('Copy');
+    copy.addEventListener('click', async () => { await navigator.clipboard.writeText(match[2]); copy.textContent = t('Copied'); setTimeout(() => { copy.textContent = t('Copy'); }, 1400); });
     const pre = document.createElement('pre'); const code = document.createElement('code'); code.textContent = match[2].replace(/\s+$/, ''); pre.append(code);
     head.append(language, copy); block.append(head, pre); container.append(block); cursor = match.index + match[0].length;
   }
@@ -393,7 +397,7 @@ function addMessage(role, text, attachments = [], statusText = '') {
   message.className = `message ${role}`;
   const label = document.createElement('span');
   label.className = 'message-label';
-  label.textContent = role === 'user' ? 'You' : 'Qwen';
+  label.textContent = role === 'user' ? t('You') : t('Qwen');
   message.append(label);
   if (role === 'assistant') renderAssistantContent(message, text);
   else message.append(document.createTextNode(text));
@@ -411,6 +415,15 @@ function addRunStatus() {
   card.className = 'run-status';
   card.innerHTML = '<div class="run-status-head"><span class="run-spinner"></span><strong>Qwen is working</strong><span class="run-elapsed">0:00</span><span class="run-state">Starting</span><button class="run-pause" type="button">Pause</button><button class="run-stop" type="button">Stop</button></div><div class="run-live" role="status" aria-live="polite"><span class="live-pulse"></span><div><strong>Starting the local agent</strong><small>Preparing your request…</small></div></div><div class="run-approval" hidden><strong>Qwen needs your approval</strong><p></p><small></small><div><button class="approve" type="button">Approve once</button><button class="deny" type="button">Deny</button></div></div><pre class="run-draft" aria-label="Live response preview" hidden></pre><div class="run-events"></div>';
   const artifacts = document.createElement('div'); artifacts.className = 'run-artifacts'; artifacts.hidden = true; card.querySelector('.run-events').before(artifacts);
+  card.querySelector('.run-status-head > strong').textContent = t('Qwen is working');
+  card.querySelector('.run-state').textContent = t('Starting');
+  card.querySelector('.run-pause').textContent = t('Pause');
+  card.querySelector('.run-stop').textContent = t('Stop');
+  card.querySelector('.run-live strong').textContent = t('Starting the local agent');
+  card.querySelector('.run-live small').textContent = t('Preparing your request…');
+  card.querySelector('.run-approval strong').textContent = t('Qwen needs your approval');
+  card.querySelector('.approve').textContent = t('Approve once');
+  card.querySelector('.deny').textContent = t('Deny');
   messages.append(card);
   card.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   return card;
@@ -431,34 +444,34 @@ function updateRunActivity(card, job) {
     const pending = job.pendingApproval;
     approval.hidden = !pending;
     if (pending) {
-      approval.querySelector('p').textContent = pending.request?.reason || 'This action needs your approval.';
+      approval.querySelector('p').textContent = pending.request?.reason || t('This action needs your approval.');
       const detail = pending.request?.command || pending.request?.target || pending.request?.tool || '';
       approval.querySelector('small').textContent = detail;
       approval.querySelector('.approve').onclick = () => respondToApproval(job.id, true, approval);
       approval.querySelector('.deny').onclick = () => respondToApproval(job.id, false, approval);
     }
   }
-  const labels = { queued: 'Queued', setup: 'Preparing your workspace', waiting: 'Waiting for idle time', model: 'Loading the request into Qwen', generating: 'Qwen is generating', tool: 'Using a computer tool', approval: 'Waiting for your approval', paused: 'Paused safely', blocked: 'Blocked safely', supervisor: 'Codex is reviewing the evidence', verifying: 'Checking the result', complete: 'Finished', complete_with_warnings: 'Finished with warnings' };
-  live.querySelector('strong').textContent = labels[job.phase] || 'Qwen is working';
+  const labels = { queued: t('Queued'), setup: t('Preparing your workspace'), waiting: t('Waiting for idle time'), model: t('Loading the request into Qwen'), generating: t('Qwen is generating'), tool: t('Using a computer tool'), approval: t('Waiting for your approval'), paused: t('Paused safely'), blocked: t('Blocked safely'), supervisor: t('Codex is reviewing the evidence'), verifying: t('Checking the result'), complete: t('Finished'), complete_with_warnings: t('Finished with warnings') };
+  live.querySelector('strong').textContent = labels[job.phase] || t('Qwen is working');
   const metrics = job.metrics || {};
-  const contextSummary = metrics.estimatedContextTokens ? `Context: ${Number(metrics.estimatedContextTokens).toLocaleString()} / ${Number(metrics.contextLimit || 0).toLocaleString()} tokens (${Number(metrics.contextUtilization || 0).toFixed(1)}%)` : '';
+  const contextSummary = metrics.estimatedContextTokens ? `${t('Context:')} ${Number(metrics.estimatedContextTokens).toLocaleString()} / ${Number(metrics.contextLimit || 0).toLocaleString()} tokens (${Number(metrics.contextUtilization || 0).toFixed(1)}%)` : '';
   const draft = card.querySelector('.run-draft');
   if (metrics.responsePreview) { draft.hidden = false; draft.textContent = metrics.responsePreview; }
-  const generated = metrics.totalGeneratedTokens ? ` · ${Number(metrics.totalGeneratedTokens).toLocaleString()} generated tokens total` : metrics.generatedCharacters ? ` · ${Number(metrics.generatedCharacters).toLocaleString()} characters generated` : '';
+  const generated = metrics.totalGeneratedTokens ? ` · ${Number(metrics.totalGeneratedTokens).toLocaleString()} ${t('generated tokens total')}` : metrics.generatedCharacters ? ` · ${Number(metrics.generatedCharacters).toLocaleString()} ${t('characters generated')}` : '';
   const staleSeconds = Math.max(0, Math.floor(Date.now() / 1000 - (job.updatedAt || Date.now() / 1000)));
   if (['model', 'generating'].includes(job.phase) && staleSeconds >= 10) {
-    live.querySelector('strong').textContent = job.phase === 'model' ? 'Ollama is processing the conversation' : 'Waiting for more model output';
-    live.querySelector('small').textContent = `Ollama is still processing this agent step. No new token for ${staleSeconds}s · this run has no automatic time limit. Use Stop only if you want to end it.${generated}`;
+    live.querySelector('strong').textContent = job.phase === 'model' ? t('Ollama is processing the conversation') : t('Waiting for more model output');
+    live.querySelector('small').textContent = t('notice.staleAgent', { seconds: staleSeconds }) + generated;
   } else {
-    live.querySelector('small').textContent = `${job.activity || 'Waiting for the next update…'}${generated}`;
+    live.querySelector('small').textContent = `${job.activity || t('Waiting for the next update…')}${generated}`;
   }
   renderRunArtifacts(card, job);
   if (contextSummary) live.querySelector('small').textContent += ` · ${contextSummary}`;
   const elapsed = Math.max(0, Math.floor(Date.now() / 1000 - (job.createdAt || Date.now() / 1000)));
   card.querySelector('.run-elapsed').textContent = `${Math.floor(elapsed / 60)}:${String(elapsed % 60).padStart(2, '0')}`;
   const pause = card.querySelector('.run-pause');
-  if (pause) { pause.textContent = job.pauseRequested ? 'Resume' : 'Pause'; pause.disabled = Boolean(job.pendingApproval); pause.onclick = () => respondToPause(job.id, !job.pauseRequested, pause); }
-  card.querySelector('.run-state').textContent = job.phase === 'paused' ? 'Paused' : job.phase === 'blocked' ? 'Blocked' : job.phase === 'generating' ? 'Generating' : job.phase === 'tool' ? 'Using tool' : job.phase === 'supervisor' ? 'Supervising' : job.phase === 'verifying' ? 'Verifying' : 'Running';
+  if (pause) { pause.textContent = job.pauseRequested ? t('Resume') : t('Pause'); pause.disabled = Boolean(job.pendingApproval); pause.onclick = () => respondToPause(job.id, !job.pauseRequested, pause); }
+  card.querySelector('.run-state').textContent = job.phase === 'paused' ? t('Paused') : job.phase === 'blocked' ? t('Blocked') : job.phase === 'generating' ? t('Generating') : job.phase === 'tool' ? t('Using tool') : job.phase === 'supervisor' ? t('Supervising') : job.phase === 'verifying' ? t('Verifying') : t('Running');
 }
 
 function renderRunArtifacts(card, job) {
@@ -468,10 +481,10 @@ function renderRunArtifacts(card, job) {
   const artifacts = [...new Set((job.artifacts || []).filter(path => path && !String(path).startsWith('Files created by')))].slice(0, 24);
   if (!artifacts.length) { container.hidden = true; return; }
   container.hidden = false;
-  const heading = document.createElement('strong'); heading.textContent = 'Files Qwen changed'; container.append(heading);
+  const heading = document.createElement('strong'); heading.textContent = t('Files Qwen changed'); container.append(heading);
   const list = document.createElement('div'); list.className = 'run-artifact-list';
   artifacts.forEach(path => {
-    const button = document.createElement('button'); button.type = 'button'; button.className = 'run-artifact'; button.textContent = String(path); button.title = 'Open a read-only file review';
+    const button = document.createElement('button'); button.type = 'button'; button.className = 'run-artifact'; button.textContent = String(path); button.title = t('Open a read-only file review');
     button.addEventListener('click', () => { showView('workspace'); reviewProjectFile(String(path)); });
     list.append(button);
   });
@@ -482,7 +495,7 @@ async function respondToPause(jobId, paused, button) {
   button.disabled = true;
   try {
     const response = await fetch(`/api/jobs/${jobId}/pause`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ paused }) });
-    if (!response.ok) throw new Error((await response.json()).error || 'Pause state could not be changed.');
+    if (!response.ok) throw new Error((await response.json()).error || t('Pause state could not be changed.'));
   } catch (error) { showNotice(error.message); button.disabled = false; }
 }
 
@@ -490,8 +503,8 @@ async function respondToApproval(jobId, approved, panel) {
   panel.querySelectorAll('button').forEach(button => { button.disabled = true; });
   try {
     const response = await fetch(`/api/jobs/${jobId}/approve`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ approved }) });
-    if (!response.ok) throw new Error((await response.json()).error || 'Approval response could not be saved.');
-    panel.querySelector('strong').textContent = approved ? 'Approval sent' : 'Denial sent';
+    if (!response.ok) throw new Error((await response.json()).error || t('Approval response could not be saved.'));
+    panel.querySelector('strong').textContent = approved ? t('Approval sent') : t('Denial sent');
   } catch (error) {
     panel.querySelector('small').textContent = error.message;
     panel.querySelectorAll('button').forEach(button => { button.disabled = false; });
@@ -528,7 +541,7 @@ async function watchJob(jobId, card) {
   let connectionFailures = 0;
   card.querySelector('.run-stop').addEventListener('click', async () => {
     card.querySelector('.run-stop').disabled = true;
-    card.querySelector('.run-stop').textContent = 'Stopping';
+    card.querySelector('.run-stop').textContent = t('Stopping');
     await fetch(`/api/jobs/${jobId}`, { method: 'DELETE' });
   });
   while (true) {
@@ -541,33 +554,33 @@ async function watchJob(jobId, card) {
     } catch {
       connectionFailures += 1;
       setConnected(false);
-      card.querySelector('.run-state').textContent = 'Reconnecting';
+      card.querySelector('.run-state').textContent = t('Reconnecting');
       if (connectionFailures < 20) continue;
-      throw new Error('The local agent backend disconnected and could not restart.');
+      throw new Error(t('The local agent backend disconnected and could not restart.'));
     }
-    if (response.status === 404) throw new Error('The agent restarted during this task. Please send the prompt again.');
-    if (!response.ok) throw new Error('The agent job could not be loaded.');
+    if (response.status === 404) throw new Error(t('The agent restarted during this task. Please send the prompt again.'));
+    if (!response.ok) throw new Error(t('The agent job could not be loaded.'));
     const job = await response.json();
     updateRunActivity(card, job);
     (job.events || []).slice(eventCount).forEach(event => appendRunEvent(card, event));
     eventCount = (job.events || []).length;
     if (job.status === 'complete' || job.status === 'complete_with_warnings') {
-      finishRunCard(card, job.status === 'complete_with_warnings' ? 'Complete with warnings' : 'Complete', job.status === 'complete_with_warnings');
-      const answer = job.message?.content || 'Qwen returned an empty response.';
+      finishRunCard(card, job.status === 'complete_with_warnings' ? t('Complete with warnings') : t('Complete'), job.status === 'complete_with_warnings');
+      const answer = job.message?.content || t('Qwen returned an empty response.');
       state.history.push({ role: 'assistant', content: answer });
       addMessage('assistant', answer);
       return;
     }
     if (job.status === 'blocked') {
-      finishRunCard(card, 'Blocked', true);
-      const reason = job.blockedReason || job.error || 'Repeated recovery failures stopped this run safely.';
-      addMessage('assistant', `Qwen is blocked: ${reason}\n\nThe files were left in place. Fix the blocker, then resume this job or send a new instruction.`);
+      finishRunCard(card, t('Blocked'), true);
+      const reason = job.blockedReason || job.error || t('Repeated recovery failures stopped this run safely.');
+      addMessage('assistant', t('notice.blocked', { reason }));
       return;
     }
     if (job.status === 'error' || job.status === 'stopped') {
-      if (job.status === 'stopped' && state.steering) { finishRunCard(card, 'Steered'); return { steered: true }; }
-      finishRunCard(card, 'Stopped', true);
-      throw new Error(job.error || 'Qwen could not complete that request.');
+      if (job.status === 'stopped' && state.steering) { finishRunCard(card, t('Steered')); return { steered: true }; }
+      finishRunCard(card, t('Stopped'), true);
+      throw new Error(job.error || t('Qwen could not complete that request.'));
     }
   }
 }
@@ -577,11 +590,11 @@ async function newChat() { await createChat(null); }
 async function queueDirection(text) {
   if (!text.trim() && !state.pendingAttachments.length) return;
   const attachments = [...state.pendingAttachments]; state.pendingAttachments = []; renderAttachmentTray();
-  const content = text.trim() || 'Review the attached file and incorporate it into the current task.';
-  const element = addMessage('user', content, attachments, 'Queued to steer the active run');
+  const content = text.trim() || t('Review the attached file and incorporate it into the current task.');
+  const element = addMessage('user', content, attachments, t('Queued to steer the active run'));
   state.queuedDirections.push({ text: content, attachments, element });
-  if (state.activeRunCard) appendRunEvent(state.activeRunCard, { kind: 'steer', text: `New direction received: ${content}`, detail: { Queue: `${state.queuedDirections.length} message${state.queuedDirections.length === 1 ? '' : 's'} waiting`, Action: 'Stopping the current model turn, then continuing with this direction' } });
-  $('#send').textContent = 'Queued';
+  if (state.activeRunCard) appendRunEvent(state.activeRunCard, { kind: 'steer', text: t('New direction received:') + ' ' + content, detail: { Queue: `${state.queuedDirections.length} message${state.queuedDirections.length === 1 ? '' : 's'} waiting`, Action: t('Stopping the current model turn, then continuing with this direction') } });
+  $('#send').textContent = t('Queued');
   if (!state.steering && state.activeJobId) {
     state.steering = true;
     await fetch(`/api/jobs/${state.activeJobId}`, { method: 'DELETE' });
@@ -591,25 +604,25 @@ async function queueDirection(text) {
 async function drainDirections() {
   if (state.running || !state.queuedDirections.length) return;
   const next = state.queuedDirections.shift();
-  const status = next.element?.querySelector('.message-status'); if (status) status.textContent = 'Steering Qwen now';
+  const status = next.element?.querySelector('.message-status'); if (status) status.textContent = t('Steering Qwen now');
   await sendMessage(next.text, { attachments: next.attachments, alreadyRendered: true, messageElement: next.element });
 }
 
 async function sendMessage(text, options = {}) {
   if (state.running) { await queueDirection(text); return; }
-  if (!state.runtimeReady) { showNotice('Ollama is still starting. Qwen will be available when the local runtime indicator turns green.'); return; }
+  if (!state.runtimeReady) { showNotice(t('Ollama is still starting. Qwen will be available when the local runtime indicator turns green.')); return; }
   const availableAttachments = options.attachments || state.pendingAttachments;
   if (!text.trim() && !availableAttachments.length) return;
   if (!state.threadId && !(await createChat())) return;
   const outgoingAttachments = [...availableAttachments];
-  const outgoingText = text.trim() || 'Review the attached file and help me with it.';
+  const outgoingText = text.trim() || t('Review the attached file and help me with it.');
   state.steering = false;
   state.running = true;
   intro.hidden = true;
   state.history.push({ role: 'user', content: outgoingText, attachments: outgoingAttachments });
   if (!options.alreadyRendered) addMessage('user', outgoingText, outgoingAttachments);
   $('#send').disabled = false;
-  $('#send').textContent = 'Steer';
+  $('#send').textContent = t('Steer');
   $('#mode').disabled = true;
   const runCard = addRunStatus();
   state.activeRunCard = runCard;
@@ -621,8 +634,8 @@ async function sendMessage(text, options = {}) {
       if (response.status !== 409 || !options.alreadyRendered) break;
       await new Promise(resolve => setTimeout(resolve, 250));
     }
-    if (!response.ok) throw new Error(data.error || 'Qwen could not start that request.');
-    const queuedStatus = options.messageElement?.querySelector('.message-status'); if (queuedStatus) queuedStatus.textContent = 'Direction sent to Qwen';
+    if (!response.ok) throw new Error(data.error || t('Qwen could not start that request.'));
+    const queuedStatus = options.messageElement?.querySelector('.message-status'); if (queuedStatus) queuedStatus.textContent = t('Direction sent to Qwen');
     state.threadId = data.threadId || state.threadId;
     if (!options.attachments) { state.pendingAttachments = []; renderAttachmentTray(); }
     state.activeJobId = data.jobId;
@@ -632,16 +645,16 @@ async function sendMessage(text, options = {}) {
     setConnected(true);
   } catch (error) {
     if (!state.steering) {
-      finishRunCard(runCard, 'Stopped', true);
+      finishRunCard(runCard, t('Stopped'), true);
       const live = runCard.querySelector('.run-live');
-      live.querySelector('strong').textContent = 'The run stopped';
+      live.querySelector('strong').textContent = t('The run stopped');
       live.querySelector('small').textContent = error.message;
-      addMessage('assistant', `Error: ${error.message}`);
+      addMessage('assistant', t('Error:') + ' ' + error.message);
     }
   }
   finally {
     state.running = false; state.activeJobId = null; state.activeRunCard = null;
-    $('#send').disabled = false; $('#send').textContent = state.queuedDirections.length ? 'Queued' : 'Send'; $('#mode').disabled = false; updateComposerAvailability(); prompt.focus();
+    $('#send').disabled = false; $('#send').textContent = state.queuedDirections.length ? t('Queued') : t('Send'); $('#mode').disabled = false; updateComposerAvailability(); prompt.focus();
     if (state.queuedDirections.length) setTimeout(drainDirections, 0);
   }
 }
@@ -652,7 +665,7 @@ function libraryItem(item) {
   element.className = 'library-item';
   const name = document.createElement('strong'); name.textContent = item.name;
   const description = document.createElement('p'); description.textContent = item.description;
-  const button = document.createElement('button'); button.type = 'button'; button.textContent = 'Use template';
+  const button = document.createElement('button'); button.type = 'button'; button.textContent = t('Use template');
   element.append(name, description, button);
   button.addEventListener('click', () => {
     $('#mcp-form').hidden = false;
@@ -674,34 +687,34 @@ async function refreshMcps() {
   try {
     const [connections, library] = await Promise.all([fetch('/api/mcps').then(r => r.json()), fetch('/api/mcp-library').then(r => r.json())]);
     const list = $('#mcp-list'); list.innerHTML = '';
-    if (!connections.connections.length) list.innerHTML = '<p class="muted">No MCP connections yet.</p>';
+    if (!connections.connections.length) list.innerHTML = '<p class="muted">' + t('No MCP connections yet.') + '</p>';
     connections.connections.forEach(connection => {
       const card = document.createElement('article'); card.className = 'mcp-card';
       const target = connection.transport === 'streamable-http' ? connection.url : `${connection.command || ''} ${(connection.args || []).join(' ')}`;
       const letter = document.createElement('div'); letter.className = 'mcp-letter'; letter.textContent = (connection.name || 'M')[0].toUpperCase();
       const main = document.createElement('div'); main.className = 'mcp-main';
       const title = document.createElement('strong'); title.textContent = connection.name;
-      const endpoint = document.createElement('span'); endpoint.textContent = `${connection.transport === 'streamable-http' ? 'Streamable HTTP · ' : ''}${target}`;
+      const endpoint = document.createElement('span'); endpoint.textContent = `${connection.transport === 'streamable-http' ? t('Streamable HTTP') + ' · ' : ''}${target}`;
       main.append(title, endpoint);
       const actions = document.createElement('div'); actions.className = 'mcp-actions';
-      const toggle = document.createElement('button'); toggle.className = 'outline toggle'; toggle.textContent = connection.enabled === false ? 'Enable' : 'Disable';
-      const test = document.createElement('button'); test.className = 'outline test'; test.textContent = 'Test';
-      const remove = document.createElement('button'); remove.className = 'outline danger remove'; remove.textContent = 'Remove';
+      const toggle = document.createElement('button'); toggle.className = 'outline toggle'; toggle.textContent = connection.enabled === false ? t('Enable') : t('Disable');
+      const test = document.createElement('button'); test.className = 'outline test'; test.textContent = t('Test');
+      const remove = document.createElement('button'); remove.className = 'outline danger remove'; remove.textContent = t('Remove');
       actions.append(toggle, test, remove); card.append(letter, main, actions);
-      toggle.addEventListener('click', async () => { toggle.disabled = true; try { const result = await fetch(`/api/mcps/${encodeURIComponent(connection.id)}/toggle`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled: connection.enabled === false }) }).then(r => r.json()); if (result.enabled !== undefined) { connection.enabled = result.enabled; toggle.textContent = result.enabled ? 'Disable' : 'Enable'; } } finally { toggle.disabled = false; } });
-  card.querySelector('.test').addEventListener('click', async () => { const button = card.querySelector('.test'); button.textContent = 'Testing'; try { const response = await fetch(`/api/mcps/${encodeURIComponent(connection.id)}/test`, { method: 'POST' }); const result = await response.json(); if (!response.ok) throw new Error(result.error || result.message || 'Connection diagnostics failed.'); button.textContent = `${(result.tools || []).length} tools`; showNotice(`MCP connection is healthy · ${(result.tools || []).length} tools found.`, 'success'); } catch (error) { button.textContent = 'Failed'; showNotice(error.message); } });
+      toggle.addEventListener('click', async () => { toggle.disabled = true; try { const result = await fetch(`/api/mcps/${encodeURIComponent(connection.id)}/toggle`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled: connection.enabled === false }) }).then(r => r.json()); if (result.enabled !== undefined) { connection.enabled = result.enabled; toggle.textContent = result.enabled ? t('Disable') : t('Enable'); } } finally { toggle.disabled = false; } });
+  card.querySelector('.test').addEventListener('click', async () => { const button = card.querySelector('.test'); button.textContent = t('Testing'); try { const response = await fetch(`/api/mcps/${encodeURIComponent(connection.id)}/test`, { method: 'POST' }); const result = await response.json(); if (!response.ok) throw new Error(result.error || result.message || t('Connection diagnostics failed.')); button.textContent = `${(result.tools || []).length} tools`; showNotice(`${(result.tools || []).length} tools · MCP connection is healthy`, 'success'); } catch (error) { button.textContent = t('Failed'); showNotice(error.message); } });
       card.querySelector('.remove').addEventListener('click', async () => { await fetch(`/api/mcps/${encodeURIComponent(connection.id)}`, { method: 'DELETE' }); refreshMcps(); loadStatus(); });
       list.append(card);
     });
     const libraryList = $('#library-list'); libraryList.innerHTML = ''; library.items.forEach(item => libraryList.append(libraryItem(item)));
-  } catch { $('#mcp-list').innerHTML = '<p class="muted">Unable to load MCP connections.</p>'; }
+  } catch { $('#mcp-list').innerHTML = '<p class="muted">' + t('Unable to load MCP connections.') + '</p>'; }
 }
 
 async function refreshProjects() {
   try {
     const [projects, tree, threads] = await Promise.all([fetch('/api/projects').then(r => r.json()), fetch('/api/project/files').then(r => r.json()), fetch('/api/threads').then(r => r.json())]);
     const list = $('#project-list'); list.innerHTML = '';
-    if (!projects.items.length) list.innerHTML = '<p class="muted">No project folders linked yet. Link a folder to give Qwen a dedicated workspace.</p>';
+    if (!projects.items.length) list.innerHTML = '<p class="muted">' + t('No project folders linked yet. Link a folder to give Qwen a dedicated workspace.') + '</p>';
     projects.items.forEach(project => {
       const card = document.createElement('article');
       const active = projects.active === project.id;
@@ -713,27 +726,27 @@ async function refreshProjects() {
       const projectPath = document.createElement('span'); projectPath.textContent = project.path;
       projectMain.append(projectName, projectPath);
       const projectActions = document.createElement('div'); projectActions.className = 'project-actions';
-      if (active) { const activeLabel = document.createElement('span'); activeLabel.className = 'active-project'; activeLabel.textContent = 'Active'; projectActions.append(activeLabel); }
-      else { const activate = document.createElement('button'); activate.className = 'outline activate'; activate.textContent = 'Open'; projectActions.append(activate); }
-      const projectPermission = document.createElement('select'); projectPermission.className = 'project-permission'; projectPermission.title = 'Permission profile for this project';
-      [['project-write', 'Write'], ['read-only', 'Read'], ['full-access', 'Full']].forEach(([value, label]) => { const option = document.createElement('option'); option.value = value; option.textContent = label; projectPermission.append(option); });
+      if (active) { const activeLabel = document.createElement('span'); activeLabel.className = 'active-project'; activeLabel.textContent = t('Active'); projectActions.append(activeLabel); }
+      else { const activate = document.createElement('button'); activate.className = 'outline activate'; activate.textContent = t('Open'); projectActions.append(activate); }
+      const projectPermission = document.createElement('select'); projectPermission.className = 'project-permission'; projectPermission.title = t('Permission profile for this project');
+      [['project-write', 'Write'], ['read-only', 'Read'], ['full-access', 'Full']].forEach(([value, label]) => { const option = document.createElement('option'); option.value = value; option.textContent = t(label); projectPermission.append(option); });
       projectPermission.value = project.permissionProfile || state.supervisor?.permissionProfile || 'project-write';
-      projectPermission.addEventListener('change', async () => { const response = await fetch(`/api/projects/${project.id}/permissions`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ permissionProfile: projectPermission.value }) }); if (!response.ok) showNotice('The project permission profile could not be saved.'); else { project.permissionProfile = projectPermission.value; showNotice(`Project permissions set to ${projectPermission.options[projectPermission.selectedIndex].text}.`, 'success'); } });
+      projectPermission.addEventListener('change', async () => { const response = await fetch(`/api/projects/${project.id}/permissions`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ permissionProfile: projectPermission.value }) }); if (!response.ok) showNotice(t('The project permission profile could not be saved.')); else { project.permissionProfile = projectPermission.value; showNotice(t('Project permissions set to') + ' ' + projectPermission.options[projectPermission.selectedIndex].text + '.', 'success'); } });
       projectActions.append(projectPermission);
-      const removeProject = document.createElement('button'); removeProject.className = 'icon-only remove-project'; removeProject.title = 'Unlink project'; removeProject.dataset.icon = 'trash'; projectActions.append(removeProject);
+      const removeProject = document.createElement('button'); removeProject.className = 'icon-only remove-project'; removeProject.title = t('Unlink project'); removeProject.dataset.icon = 'trash'; projectActions.append(removeProject);
       projectHead.append(projectIcon, projectMain, projectActions); card.append(projectHead);
       card.querySelector('.activate')?.addEventListener('click', async () => { await activateProject(project.id, true); });
       card.querySelector('.remove-project').addEventListener('click', async () => { await fetch(`/api/projects/${project.id}`, { method: 'DELETE' }); await Promise.all([refreshProjects(), loadStatus()]); });
       const chatArea = document.createElement('div'); chatArea.className = 'project-card-chats';
-      const chatHead = document.createElement('div'); chatHead.className = 'project-card-chats-head'; const chatLabel = document.createElement('span'); chatLabel.textContent = 'Chats';
-      const addChat = document.createElement('button'); addChat.type = 'button'; addChat.textContent = 'New chat';
+      const chatHead = document.createElement('div'); chatHead.className = 'project-card-chats-head'; const chatLabel = document.createElement('span'); chatLabel.textContent = t('Chats');
+      const addChat = document.createElement('button'); addChat.type = 'button'; addChat.textContent = t('New chat');
       addChat.addEventListener('click', async () => { if (state.project?.id !== project.id && !(await activateProject(project.id, false))) return; await createChat(project.id); });
       chatHead.append(chatLabel, addChat); chatArea.append(chatHead);
       const projectThreads = threads.items.filter(thread => thread.projectId === project.id);
-      if (!projectThreads.length) { const empty = document.createElement('p'); empty.textContent = 'No chats in this project yet.'; chatArea.append(empty); }
+      if (!projectThreads.length) { const empty = document.createElement('p'); empty.textContent = t('No chats in this project yet.'); chatArea.append(empty); }
       projectThreads.slice(0, 8).forEach(thread => {
         const chat = document.createElement('button'); chat.type = 'button'; chat.className = `project-card-chat ${thread.id === state.threadId ? 'active' : ''}`;
-        const title = document.createElement('span'); title.textContent = thread.title || 'New chat'; const count = document.createElement('small'); count.textContent = `${thread.messageCount || 0} messages`;
+        const title = document.createElement('span'); title.textContent = thread.title || t('New chat'); const count = document.createElement('small'); count.textContent = `${thread.messageCount || 0} ${t('messages')}`;
         chat.append(title, count); chat.addEventListener('click', () => openProjectThread(project.id, thread.id)); chatArea.append(chat);
       });
       card.append(chatArea);
@@ -741,74 +754,74 @@ async function refreshProjects() {
     });
     $('#workspace-path').textContent = tree.path;
     const files = $('#project-file-list'); files.innerHTML = '';
-    if (!tree.files.length) files.innerHTML = '<p class="muted">This folder is empty.</p>';
+    if (!tree.files.length) files.innerHTML = '<p class="muted">' + t('This folder is empty.') + '</p>';
     tree.files.forEach(file => {
       const row = document.createElement('div'); row.className = 'file-row';
       const icon = document.createElement('span'); icon.dataset.icon = file.type === 'folder' ? 'folder' : 'file';
       const name = document.createElement('span'); name.textContent = file.name;
       const kind = document.createElement('small'); kind.textContent = file.type;
       row.append(icon, name, kind);
-      if (file.type === 'file') { row.tabIndex = 0; row.title = 'Review this file'; row.addEventListener('click', () => reviewProjectFile(file.name)); row.addEventListener('keydown', event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); reviewProjectFile(file.name); } }); }
+      if (file.type === 'file') { row.tabIndex = 0; row.title = t('Review this file'); row.addEventListener('click', () => reviewProjectFile(file.name)); row.addEventListener('keydown', event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); reviewProjectFile(file.name); } }); }
       files.append(row); window.renderQwenIcons(row);
     });
     await refreshGitReview();
-  } catch { $('#project-list').innerHTML = '<p class="muted">Unable to load projects.</p>'; }
+  } catch { $('#project-list').innerHTML = '<p class="muted">' + t('Unable to load projects.') + '</p>'; }
 }
 
 async function reviewProjectFile(path) {
   const label = $('#file-review-path'); const content = $('#file-review-content');
   if (!label || !content) return;
-  label.textContent = path; content.textContent = 'Reading the current file…';
+  label.textContent = path; content.textContent = t('Reading the current file…');
   try {
     const response = await fetch(`/api/git/file?path=${encodeURIComponent(path)}`); const data = await response.json();
-    if (!response.ok) throw new Error(data.error || 'File review failed.');
-    content.textContent = data.content || '(empty file)';
-  } catch (error) { content.textContent = `File review unavailable: ${error.message}`; }
+    if (!response.ok) throw new Error(data.error || t('File review failed.'));
+    content.textContent = data.content || t('(empty file)');
+  } catch (error) { content.textContent = t('File review unavailable:') + ' ' + error.message; }
 }
 
 async function refreshGitReview() {
   const summary = $('#git-summary');
   const diff = $('#git-diff-stat');
   if (!summary || !diff) return;
-  summary.textContent = 'Checking repository state…';
+  summary.textContent = t('Checking repository state…');
   diff.textContent = '';
   try {
     const response = await fetch('/api/git');
     const data = await response.json();
-    if (!response.ok) throw new Error(data.error || 'Git status unavailable');
+    if (!response.ok) throw new Error(data.error || t('Git status unavailable'));
     if (!data.isRepository) {
-      summary.textContent = 'This project folder is not a Git repository.';
+      summary.textContent = t('This project folder is not a Git repository.');
       return;
     }
-    const branch = data.branch ? ` on ${data.branch}` : '';
+    const branch = data.branch ? ` ${t('on')} ${data.branch}` : '';
     const changes = Array.isArray(data.status) ? data.status.length : 0;
-    summary.textContent = changes ? `${changes} uncommitted file${changes === 1 ? '' : 's'}${branch}` : `Working tree clean${branch}`;
-    diff.textContent = data.diffStat || 'No diff summary available.';
+    summary.textContent = changes ? `${changes} ${t('uncommitted files')}${branch}` : `${t('Working tree clean')}${branch}`;
+    diff.textContent = data.diffStat || t('No diff summary available.');
   } catch (error) {
-    summary.textContent = `Git review unavailable: ${error.message}`;
+    summary.textContent = t('Git review unavailable:') + ' ' + error.message;
     diff.textContent = '';
   }
 }
 
 async function linkProject() {
-  if (!window.qwenDesktop?.chooseProjectFolder) { showNotice('Folder selection is available in the desktop app.'); return; }
+  if (!window.qwenDesktop?.chooseProjectFolder) { showNotice(t('Folder selection is available in the desktop app.')); return; }
   const path = await window.qwenDesktop.chooseProjectFolder();
   if (!path) return;
   const response = await fetch('/api/projects', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path }) });
-  if (!response.ok) { const error = await response.json(); showNotice(error.error || 'Could not link this folder.'); return; }
+  if (!response.ok) { const error = await response.json(); showNotice(error.error || t('Could not link this folder.')); return; }
   await Promise.all([refreshProjects(), loadStatus()]);
   state.threadId = null; state.history = []; clearThreadSurface(); intro.hidden = false; await refreshThreads(true);
 }
 
 async function createProject() {
-  if (!window.qwenDesktop?.chooseProjectParent) { showNotice('Project creation is available in the desktop app.'); return; }
-  const name = window.prompt('Project name');
+  if (!window.qwenDesktop?.chooseProjectParent) { showNotice(t('Project creation is available in the desktop app.')); return; }
+  const name = window.prompt(t('Project name'));
   if (!name?.trim()) return;
   const parent = await window.qwenDesktop.chooseProjectParent();
   if (!parent) return;
   const response = await fetch('/api/projects/create', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ parent, name: name.trim() }) });
   const data = await response.json();
-  if (!response.ok) { showNotice(data.error || 'Could not create this project.'); return; }
+  if (!response.ok) { showNotice(data.error || t('Could not create this project.')); return; }
   state.threadId = null; state.history = []; clearThreadSurface(); intro.hidden = false;
   await Promise.all([refreshProjects(), loadStatus()]);
   await createChat(state.project?.id || null);
@@ -828,7 +841,7 @@ $('#supervisor-mode').addEventListener('change', async event => { try { await se
 $('#supervisor-budget').addEventListener('change', async event => { try { await setSupervisorSettings({ dailyBudgetUsd: Number(event.currentTarget.value) }); } catch (error) { $('#supervisor-status').textContent = error.message; } });
 $('#permission-profile').addEventListener('change', async event => { try { await setSupervisorSettings({ permissionProfile: event.currentTarget.value }); } catch (error) { $('#supervisor-status').textContent = error.message; } });
 $('#low-resource').addEventListener('change', async event => { try { await setSupervisorSettings({ lowResource: event.currentTarget.checked }); } catch (error) { event.currentTarget.checked = !event.currentTarget.checked; $('#supervisor-status').textContent = error.message; } });
-$('#output-tokens').addEventListener('change', async event => { try { const value = Number(event.currentTarget.value); if (!Number.isInteger(value) || value < -1) throw new Error('Use -1 for unlimited or a positive whole-number token cap.'); await setSupervisorSettings({ outputTokens: value }); } catch (error) { $('#supervisor-status').textContent = error.message; loadStatus(); } });
+$('#output-tokens').addEventListener('change', async event => { try { const value = Number(event.currentTarget.value); if (!Number.isInteger(value) || value < -1) throw new Error(t('Use -1 for unlimited or a positive whole-number token cap.')); await setSupervisorSettings({ outputTokens: value }); } catch (error) { $('#supervisor-status').textContent = error.message; loadStatus(); } });
 $('#terminal-toggle').addEventListener('click', () => toggleTerminal());
 $('#attach-files').addEventListener('click', chooseAttachments);
 $('#terminal-close').addEventListener('click', () => toggleTerminal(false));
@@ -844,7 +857,7 @@ $('#terminal-input').addEventListener('keydown', event => {
 $('#composer').addEventListener('dragover', event => { event.preventDefault(); event.currentTarget.classList.add('dragging'); });
 $('#composer').addEventListener('dragleave', event => { if (!event.currentTarget.contains(event.relatedTarget)) event.currentTarget.classList.remove('dragging'); });
 $('#composer').addEventListener('drop', event => { event.preventDefault(); event.currentTarget.classList.remove('dragging'); const paths = [...event.dataTransfer.files].map(file => window.qwenDesktop?.filePath?.(file)).filter(Boolean); ingestAttachmentPaths(paths); });
-window.qwenDesktop?.onFileDrop?.(paths => ingestAttachmentPaths(paths)).catch(error => showNotice(`File drop is unavailable: ${error.message}`));
+window.qwenDesktop?.onFileDrop?.(paths => ingestAttachmentPaths(paths)).catch(error => showNotice(t('File drop is unavailable:') + ' ' + error.message));
 $('#composer').addEventListener('submit', event => { event.preventDefault(); const text = prompt.value; prompt.value = ''; sendMessage(text); });
 prompt.addEventListener('keydown', event => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); $('#composer').requestSubmit(); } });
 $$('.starter').forEach(button => button.addEventListener('click', () => { prompt.value = button.textContent; prompt.focus(); }));
@@ -854,15 +867,25 @@ $('#cancel-add').addEventListener('click', () => $('#mcp-form').hidden = true);
 $('#mcp-form [name="transport"]').addEventListener('change', event => { const http = event.currentTarget.value === 'streamable-http'; $$('.mcp-stdio-field').forEach(item => item.hidden = http); $$('.mcp-http-field').forEach(item => item.hidden = !http); });
 $('#mcp-form').addEventListener('submit', async event => {
   event.preventDefault(); const form = event.currentTarget;
-  let env = {}; let headers = {}; try { env = form.env.value.trim() ? JSON.parse(form.env.value) : {}; headers = form.headers.value.trim() ? JSON.parse(form.headers.value) : {}; } catch { showNotice('Environment or headers JSON is not valid.'); return; }
+  let env = {}; let headers = {}; try { env = form.env.value.trim() ? JSON.parse(form.env.value) : {}; headers = form.headers.value.trim() ? JSON.parse(form.headers.value) : {}; } catch { showNotice(t('Environment or headers JSON is not valid.')); return; }
   const body = { name: form.name.value, transport: form.transport.value, authMode: form.authMode?.value || 'none', command: form.command.value, url: form.url.value, args: form.args.value.split('\n').map(item => item.trim()).filter(Boolean), env, headers };
   const response = await fetch('/api/mcps', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-  if (!response.ok) { const error = await response.json(); showNotice(error.error || 'Could not save this connection.'); return; }
+  if (!response.ok) { const error = await response.json(); showNotice(error.error || t('Could not save this connection.')); return; }
   form.reset(); form.hidden = true; refreshMcps(); loadStatus();
 });
+if ($('#language')) $('#language').value = window.qwenI18n.currentLocale();
+$('#language').addEventListener('change', event => window.qwenI18n.setLocale(event.currentTarget.value));
 document.addEventListener('keydown', event => {
   if (event.ctrlKey && event.key.toLowerCase() === 'k') { event.preventDefault(); newChat(); }
   if (event.ctrlKey && event.key === '`') { event.preventDefault(); toggleTerminal(); }
+});
+window.addEventListener('qwen:locale-changed', () => {
+  renderMode();
+  renderSupervisor();
+  showView(state.currentView);
+  refreshThreads();
+  refreshRecoveryJobs();
+  loadStatus();
 });
 loadStatus().then(() => refreshThreads(true));
 setInterval(loadStatus, 5000);
