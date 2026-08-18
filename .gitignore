@@ -9,5 +9,6 @@ __pycache__/
 *.py[cod]
 .pytest_cache/
 *.log
+QwenLocalAgent/
 .DS_Store
 Thumbs.db

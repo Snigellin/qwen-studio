@@ -108,6 +108,19 @@
 /* MCP form: transport select matches the input/textarea look. */
 .mcp-form select { width: 100%; margin-top: 6px; border: 1px solid #dadade; border-radius: 6px; padding: 9px; outline: 0; font-size: 12px; background: #fff; color: #202123; }
 .mcp-form select:focus { border-color: #002fa7; }
+/* Model picker: model list is fetched from the backend and switchable in-app. */
+.model-select { position: relative; }
+#model { border: 0; background: transparent; padding: 4px 8px; border-radius: 6px; font: inherit; font-size: 12px; color: var(--q-ink, #202123); cursor: pointer; }
+#model:hover { background: rgba(0, 0, 0, .06); }
+#model:disabled { cursor: not-allowed; opacity: .55; }
+#model-menu { position: fixed; z-index: 80; min-width: 230px; max-width: 320px; max-height: 320px; overflow: auto; margin: 0; padding: 4px; list-style: none; border: 1px solid #dedee2; border-radius: 9px; background: #fff; box-shadow: 0 10px 28px rgba(0, 0, 0, .14); }
+#model-menu li { padding: 7px 10px; border-radius: 6px; font-size: 12px; color: #202123; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#model-menu li:hover { background: #f2f3f7; }
+#model-menu li.active { color: var(--q-accent, #2457e6); font-weight: 600; }
+#model-menu li[disabled] { color: #9a9aa1; cursor: default; }
+#settings-model { border: 0; background: transparent; padding: 2px 6px; border-radius: 5px; font: inherit; color: inherit; cursor: pointer; }
+#settings-model:hover { background: rgba(0, 0, 0, .06); }
+#settings-model:disabled { cursor: not-allowed; opacity: .55; }
 /* Unify every dropdown corner radius with the settings selects (6px). */
 select { border-radius: 6px; }
 .project-permission { border-radius: 6px; }

@@ -28,7 +28,8 @@ HOST, PORT = "127.0.0.1", int(os.getenv("QWEN_PORT", "8000"))
 API_TOKEN = os.getenv("QWEN_API_TOKEN", "")
 ALLOWED_ORIGINS = {"http://tauri.localhost", "https://tauri.localhost", "tauri://localhost"}
 OLLAMA_URL = os.getenv("OLLAMA_URL", "http://127.0.0.1:11434")
-MODEL = os.getenv("QWEN_MODEL", "qwen3.8:27b")
+DEFAULT_MODEL = os.getenv("QWEN_MODEL", "qwen3.8:27b")
+MODEL = DEFAULT_MODEL
 def user_data_dir():
     override = os.getenv("QWEN_DATA_DIR")
     if override: return Path(override)
@@ -93,6 +94,7 @@ SUPERVISOR_DEFAULTS = {
     "supervisorCadence": "milestones",
     "idleOnly": False,
     "busyProcesses": "",
+    "model": None,
 }
 
 PROFILES = {
@@ -118,6 +120,23 @@ def ollama_model_info():
     except Exception: pass
     MODEL_INFO_CACHE.update({"at": now, "value": value})
     return value
+
+MODEL_LIST_CACHE = {"at": 0, "value": None}
+
+def ollama_model_list():
+    """Installed Ollama model names, briefly cached; empty while Ollama is unreachable."""
+    now = time.time()
+    if MODEL_LIST_CACHE["value"] is not None and now - MODEL_LIST_CACHE["at"] < 5:
+        return MODEL_LIST_CACHE["value"]
+    names = []
+    try:
+        request = Request(f"{OLLAMA_URL}/api/tags", headers={"Content-Type": "application/json"})
+        with urlopen(request, timeout=3) as response:
+            payload = json.loads(response.read())
+        names = sorted(item.get("name", "") for item in payload.get("models", []) if item.get("name"))
+    except Exception: pass
+    MODEL_LIST_CACHE.update({"at": now, "value": names})
+    return names
 
 IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp"}
 VIDEO_EXTENSIONS = {".mp4", ".mov", ".mkv", ".webm", ".avi", ".m4v"}
@@ -200,6 +219,9 @@ def save_runtime_settings(settings):
     clean = dict(SUPERVISOR_DEFAULTS); clean.update({key: settings.get(key, value) for key, value in SUPERVISOR_DEFAULTS.items()})
     settings_file().write_text(json.dumps(clean, indent=2), encoding="utf-8")
     return clean
+
+if not os.getenv("QWEN_MODEL"):
+    MODEL = load_runtime_settings().get("model") or DEFAULT_MODEL
 
 def codex_command():
     configured = os.getenv("CODEX_COMMAND", "codex")
@@ -1347,6 +1369,8 @@ class Handler(BaseHTTPRequestHandler):
             with JOBS_LOCK:
                 running = sum(1 for job in JOBS.values() if job.get("status") == "running")
             self.send_json(200, {"model": MODEL, "workspace": str(project_workspace()), "project": project, "mcpCount": len(load_mcps()), "runningJobs": running, "runtime": ollama_model_info(), "profiles": PROFILES, "supervisor": supervisor_status()}); return
+        if route == "/api/models":
+            self.send_json(200, {"models": ollama_model_list(), "current": MODEL, "available": bool(ollama_model_info().get("available"))}); return
         if route == "/api/supervisor":
             self.send_json(200, supervisor_status()); return
         if route == "/api/jobs":
@@ -1438,6 +1462,18 @@ class Handler(BaseHTTPRequestHandler):
                     if job: job["dismissed"] = True; job["updatedAt"] = time.time()
                 if not job: self.send_json(404, {"error": "Job not found."}); return
                 persist_jobs(); self.send_json(200, {"dismissed": True}); return
+            if route == "/api/model":
+                global MODEL
+                incoming = self.read_json()
+                model = str(incoming.get("model", "")).strip()
+                if not model: self.send_json(400, {"error": "A model name is required."}); return
+                installed = ollama_model_list()
+                if installed and model not in installed:
+                    self.send_json(400, {"error": f"Model {model} is not installed in Ollama. Run \u201collama pull {model}\u201d first."}); return
+                MODEL = model
+                MODEL_INFO_CACHE.update({"at": 0, "value": None})
+                settings = load_runtime_settings(); settings["model"] = model; save_runtime_settings(settings)
+                self.send_json(200, {"model": MODEL, "runtime": ollama_model_info()}); return
             if route == "/api/supervisor":
                 incoming = self.read_json(); settings = load_runtime_settings()
                 for key in ("enabled", "mode", "sandbox", "maxRunsPerJob", "dailyBudgetUsd", "lowResource", "permissionProfile", "outputTokens", "processPriority", "supervisorCadence", "idleOnly", "busyProcesses"):

@@ -30,7 +30,7 @@ function showView(view) {
   if (view === 'workspace') refreshProjects();
 }
 
-function setConnected(connected, label = connected ? 'Local runtime ready' : 'Local runtime offline', status = connected ? 'ready' : 'offline') {
+function setConnected(connected, label = connected ? t('Local runtime ready') : t('Local runtime offline'), status = connected ? 'ready' : 'offline') {
   $('#connection').textContent = label;
   $('#connection-dot').className = status;
 }
@@ -45,8 +45,7 @@ function updateComposerAvailability() {
 async function loadStatus() {
   try {
     const data = await fetch('/api/status').then(r => r.json());
-    $('#model').textContent = data.model;
-    $('#settings-model').textContent = data.model;
+    renderModel(data.model);
     $('#workspace-path').textContent = data.workspace;
     $('#terminal-path').textContent = data.workspace;
     $('#mcp-badge').textContent = data.mcpCount;
@@ -74,6 +73,69 @@ async function loadStatus() {
   } catch { state.runtimeReady = false; setConnected(false, t('Starting local backend…'), 'starting'); updateComposerAvailability(); }
 }
 
+function translateEventText(text) {
+  const match = text.match(/^([\s\S]*?)(\d+(?:\.\d+)?)([\s\S]*)$/);
+  if (match) {
+    const templated = match[1] + '{n}' + match[3];
+    const base = t(templated);
+    if (base !== templated) return base.split('{n}').join(match[2]);
+  }
+  return t(text);
+}
+
+function renderModel(model) {
+  state.model = model;
+  $('#model').textContent = model;
+  $('#settings-model').textContent = model;
+}
+
+async function loadModelOptions() {
+  try {
+    const data = await fetch('/api/models').then(r => r.json());
+    state.models = Array.isArray(data.models) ? data.models : [];
+    renderModelMenu();
+  } catch { state.models = state.models || []; }
+}
+
+function renderModelMenu() {
+  const menu = $('#model-menu'); if (!menu) return;
+  menu.textContent = '';
+  if (!state.models.length) {
+    const item = document.createElement('li'); item.textContent = t('No models available'); item.setAttribute('disabled', ''); menu.append(item);
+    return;
+  }
+  for (const name of state.models) {
+    const item = document.createElement('li');
+    item.textContent = name;
+    item.classList.toggle('active', name === state.model);
+    item.addEventListener('click', () => switchModel(name));
+    menu.append(item);
+  }
+}
+
+function toggleModelMenu(trigger) {
+  const menu = $('#model-menu'); if (!menu) return;
+  if (!menu.hidden) { menu.hidden = true; return; }
+  loadModelOptions().then(() => {
+    menu.hidden = false;
+    const rect = trigger.getBoundingClientRect();
+    menu.style.position = 'fixed';
+    menu.style.left = Math.max(8, Math.min(rect.left, window.innerWidth - menu.offsetWidth - 8)) + 'px';
+    menu.style.top = (rect.bottom + 6) + 'px';
+  });
+}
+
+async function switchModel(model) {
+  const menu = $('#model-menu'); if (menu) menu.hidden = true;
+  try {
+    const response = await fetch('/api/model', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ model }) });
+    const data = await response.json();
+    if (!response.ok) { showNotice(data.error || t('Could not switch model.')); return; }
+    renderModel(data.model);
+    await loadStatus();
+  } catch { showNotice(t('Could not reach the backend to switch models.')); }
+}
+
 function ensureResourceControls() {
   const list = $('.settings-list');
   if (!list || $('#idle-only')) return;
@@ -98,8 +160,8 @@ function renderSupervisor() {
   $('#supervisor-toggle')?.classList.toggle('active', enabled);
   const status = $('#supervisor-status');
   if (status) {
-    const usage = data.effectiveMethod === 'api' ? ` · ${Number(data.usageRuns || 0)} reviews today · ~$${Number(data.usageEstimatedUsd || 0).toFixed(2)} estimated` : '';
-    status.textContent = available ? `${data.effectiveMethod === 'api' ? t('API-key mode (metered)') : t('Codex login')} · ${enabled ? t('enabled') : t('ready to enable')} · ${Number(data.maxRunsPerJob || 0)} reviews/job${usage}` : t('Codex CLI unavailable; install/login before enabling.');
+    const usage = data.effectiveMethod === 'api' ? ` · ${t('reviewsToday', { count: Number(data.usageRuns || 0) })} · ${t('estimated', { amount: Number(data.usageEstimatedUsd || 0).toFixed(2) })}` : '';
+    status.textContent = available ? `${data.effectiveMethod === 'api' ? t('API-key mode (metered)') : t('Codex login')} · ${enabled ? t('enabled') : t('ready to enable')} · ${t('reviewsPerJob', { count: Number(data.maxRunsPerJob || 0) })}${usage}` : t('Codex CLI unavailable; install/login before enabling.');
   }
   const mode = $('#supervisor-mode'); if (mode && data.mode) mode.value = data.mode;
   const budget = $('#supervisor-budget'); if (budget && data.dailyBudgetUsd != null) budget.value = data.dailyBudgetUsd;
@@ -140,14 +202,14 @@ async function refreshRecoveryJobs() {
 async function resumeJob(job) {
   if (state.running) return;
   if (job.threadId) await openThread(job.threadId);
-  state.running = true; state.activeJobId = job.id; $('#send').disabled = false; $('#send').textContent = t('Steer'); $('#mode').disabled = true;
+  state.running = true; state.activeJobId = job.id; $('#send').disabled = false; $('#send').textContent = t('Steer'); $('#mode').disabled = true; $('#model').disabled = true; $('#settings-model').disabled = true;
   const card = addRunStatus(); state.activeRunCard = card;
   try {
     const response = await fetch(`/api/jobs/${job.id}/resume`, { method: 'POST' }); const data = await response.json();
     if (!response.ok) throw new Error(data.error || t('The job could not be resumed.'));
     await watchJob(data.jobId || job.id, card); await refreshThreads();
   } catch (error) { finishRunCard(card, 'Stopped', true); addMessage('assistant', t('Resume error:') + ' ' + error.message); }
-  finally { state.running = false; state.activeJobId = null; state.activeRunCard = null; $('#send').disabled = false; $('#send').textContent = t('Send'); $('#mode').disabled = false; renderSupervisor(); refreshRecoveryJobs(); }
+  finally { state.running = false; state.activeJobId = null; state.activeRunCard = null; $('#send').disabled = false; $('#send').textContent = t('Send'); $('#mode').disabled = false; $('#model').disabled = false; $('#settings-model').disabled = false; renderSupervisor(); refreshRecoveryJobs(); }
 }
 
 function clearThreadSurface() {
@@ -415,15 +477,15 @@ function addRunStatus() {
   card.className = 'run-status';
   card.innerHTML = '<div class="run-status-head"><span class="run-spinner"></span><strong>Qwen is working</strong><span class="run-elapsed">0:00</span><span class="run-state">Starting</span><button class="run-pause" type="button">Pause</button><button class="run-stop" type="button">Stop</button></div><div class="run-live" role="status" aria-live="polite"><span class="live-pulse"></span><div><strong>Starting the local agent</strong><small>Preparing your request…</small></div></div><div class="run-approval" hidden><strong>Qwen needs your approval</strong><p></p><small></small><div><button class="approve" type="button">Approve once</button><button class="deny" type="button">Deny</button></div></div><pre class="run-draft" aria-label="Live response preview" hidden></pre><div class="run-events"></div>';
   const artifacts = document.createElement('div'); artifacts.className = 'run-artifacts'; artifacts.hidden = true; card.querySelector('.run-events').before(artifacts);
-  card.querySelector('.run-status-head > strong').textContent = t('Qwen is working');
-  card.querySelector('.run-state').textContent = t('Starting');
-  card.querySelector('.run-pause').textContent = t('Pause');
-  card.querySelector('.run-stop').textContent = t('Stop');
-  card.querySelector('.run-live strong').textContent = t('Starting the local agent');
-  card.querySelector('.run-live small').textContent = t('Preparing your request…');
-  card.querySelector('.run-approval strong').textContent = t('Qwen needs your approval');
-  card.querySelector('.approve').textContent = t('Approve once');
-  card.querySelector('.deny').textContent = t('Deny');
+  card.querySelector('.run-status-head > strong').textContent = t('Qwen is working'); card.querySelector('.run-status-head > strong').dataset.orig = 'Qwen is working';
+  card.querySelector('.run-state').textContent = t('Starting'); card.querySelector('.run-state').dataset.orig = 'Starting';
+  card.querySelector('.run-pause').textContent = t('Pause'); card.querySelector('.run-pause').dataset.orig = 'Pause';
+  card.querySelector('.run-stop').textContent = t('Stop'); card.querySelector('.run-stop').dataset.orig = 'Stop';
+  card.querySelector('.run-live strong').textContent = t('Starting the local agent'); card.querySelector('.run-live strong').dataset.orig = 'Starting the local agent';
+  card.querySelector('.run-live small').textContent = t('Preparing your request…'); card.querySelector('.run-live small').dataset.orig = 'Preparing your request…';
+  card.querySelector('.run-approval strong').textContent = t('Qwen needs your approval'); card.querySelector('.run-approval strong').dataset.orig = 'Qwen needs your approval';
+  card.querySelector('.approve').textContent = t('Approve once'); card.querySelector('.approve').dataset.orig = 'Approve once';
+  card.querySelector('.deny').textContent = t('Deny'); card.querySelector('.deny').dataset.orig = 'Deny';
   messages.append(card);
   card.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   return card;
@@ -431,7 +493,7 @@ function addRunStatus() {
 
 function finishRunCard(card, stateLabel, failed = false) {
   card.querySelector('.run-spinner').classList.add(failed ? 'failed' : 'done');
-  card.querySelector('.run-state').textContent = stateLabel;
+  card.querySelector('.run-state').textContent = stateLabel; card.querySelector('.run-state').setAttribute('data-orig', stateLabel);
   card.querySelector('.run-live')?.classList.add(failed ? 'failed' : 'finished');
   card.querySelector('.run-pause')?.remove();
 }
@@ -451,8 +513,9 @@ function updateRunActivity(card, job) {
       approval.querySelector('.deny').onclick = () => respondToApproval(job.id, false, approval);
     }
   }
-  const labels = { queued: t('Queued'), setup: t('Preparing your workspace'), waiting: t('Waiting for idle time'), model: t('Loading the request into Qwen'), generating: t('Qwen is generating'), tool: t('Using a computer tool'), approval: t('Waiting for your approval'), paused: t('Paused safely'), blocked: t('Blocked safely'), supervisor: t('Codex is reviewing the evidence'), verifying: t('Checking the result'), complete: t('Finished'), complete_with_warnings: t('Finished with warnings') };
-  live.querySelector('strong').textContent = labels[job.phase] || t('Qwen is working');
+  const labels = { queued: 'Queued', setup: 'Preparing your workspace', waiting: 'Waiting for idle time', model: 'Loading the request into Qwen', generating: 'Qwen is generating', tool: 'Using a computer tool', approval: 'Waiting for your approval', paused: 'Paused safely', blocked: 'Blocked safely', supervisor: 'Codex is reviewing the evidence', verifying: 'Checking the result', complete: 'Finished', complete_with_warnings: 'Finished with warnings' };
+  const liveKey = labels[job.phase] || 'Qwen is working';
+  live.querySelector('strong').textContent = t(liveKey); live.querySelector('strong').dataset.orig = liveKey;
   const metrics = job.metrics || {};
   const contextSummary = metrics.estimatedContextTokens ? `${t('Context:')} ${Number(metrics.estimatedContextTokens).toLocaleString()} / ${Number(metrics.contextLimit || 0).toLocaleString()} tokens (${Number(metrics.contextUtilization || 0).toFixed(1)}%)` : '';
   const draft = card.querySelector('.run-draft');
@@ -460,18 +523,20 @@ function updateRunActivity(card, job) {
   const generated = metrics.totalGeneratedTokens ? ` · ${Number(metrics.totalGeneratedTokens).toLocaleString()} ${t('generated tokens total')}` : metrics.generatedCharacters ? ` · ${Number(metrics.generatedCharacters).toLocaleString()} ${t('characters generated')}` : '';
   const staleSeconds = Math.max(0, Math.floor(Date.now() / 1000 - (job.updatedAt || Date.now() / 1000)));
   if (['model', 'generating'].includes(job.phase) && staleSeconds >= 10) {
-    live.querySelector('strong').textContent = job.phase === 'model' ? t('Ollama is processing the conversation') : t('Waiting for more model output');
+    const staleKey = job.phase === 'model' ? 'Ollama is processing the conversation' : 'Waiting for more model output';
+    live.querySelector('strong').textContent = t(staleKey); live.querySelector('strong').dataset.orig = staleKey;
     live.querySelector('small').textContent = t('notice.staleAgent', { seconds: staleSeconds }) + generated;
   } else {
-    live.querySelector('small').textContent = `${job.activity || t('Waiting for the next update…')}${generated}`;
+    live.querySelector('small').textContent = `${t(job.activity) || t('Waiting for the next update…')}${generated}`;
   }
   renderRunArtifacts(card, job);
   if (contextSummary) live.querySelector('small').textContent += ` · ${contextSummary}`;
   const elapsed = Math.max(0, Math.floor(Date.now() / 1000 - (job.createdAt || Date.now() / 1000)));
   card.querySelector('.run-elapsed').textContent = `${Math.floor(elapsed / 60)}:${String(elapsed % 60).padStart(2, '0')}`;
   const pause = card.querySelector('.run-pause');
-  if (pause) { pause.textContent = job.pauseRequested ? t('Resume') : t('Pause'); pause.disabled = Boolean(job.pendingApproval); pause.onclick = () => respondToPause(job.id, !job.pauseRequested, pause); }
-  card.querySelector('.run-state').textContent = job.phase === 'paused' ? t('Paused') : job.phase === 'blocked' ? t('Blocked') : job.phase === 'generating' ? t('Generating') : job.phase === 'tool' ? t('Using tool') : job.phase === 'supervisor' ? t('Supervising') : job.phase === 'verifying' ? t('Verifying') : t('Running');
+  if (pause) { const pauseKey = job.pauseRequested ? 'Resume' : 'Pause'; pause.textContent = t(pauseKey); pause.dataset.orig = pauseKey; pause.disabled = Boolean(job.pendingApproval); pause.onclick = () => respondToPause(job.id, !job.pauseRequested, pause); }
+  const stateKey = job.phase === 'paused' ? 'Paused' : job.phase === 'blocked' ? 'Blocked' : job.phase === 'generating' ? 'Generating' : job.phase === 'tool' ? 'Using tool' : job.phase === 'supervisor' ? 'Supervising' : job.phase === 'verifying' ? 'Verifying' : 'Running';
+  card.querySelector('.run-state').textContent = t(stateKey); card.querySelector('.run-state').dataset.orig = stateKey;
 }
 
 function renderRunArtifacts(card, job) {
@@ -516,7 +581,8 @@ function appendRunEvent(card, event) {
   item.className = `run-event ${event.kind}`;
   const title = document.createElement('div');
   title.className = 'run-event-title';
-  title.textContent = event.text;
+  title.textContent = translateEventText(event.text);
+  title.setAttribute('data-orig', event.text);
   item.append(title);
   if (event.detail && Object.keys(event.detail).length) {
     const details = document.createElement('div'); details.className = 'run-event-detail';
@@ -524,9 +590,10 @@ function appendRunEvent(card, event) {
     Object.entries(event.detail).forEach(([label, value]) => {
       const term = document.createElement('dt');
       const description = document.createElement('dd');
-      term.textContent = label;
-      description.textContent = String(value);
-      if (/command|path|input|output|error/i.test(label)) description.className = 'technical-value';
+      const technical = /command|path|input|output|error/i.test(label);
+      term.textContent = t(label); term.setAttribute('data-orig', label);
+      description.textContent = technical ? String(value) : t(String(value)); description.setAttribute('data-orig', String(value));
+      if (technical) description.className = 'technical-value';
       fields.append(term, description);
     });
     details.append(fields);
@@ -624,6 +691,8 @@ async function sendMessage(text, options = {}) {
   $('#send').disabled = false;
   $('#send').textContent = t('Steer');
   $('#mode').disabled = true;
+  $('#model').disabled = true;
+  $('#settings-model').disabled = true;
   const runCard = addRunStatus();
   state.activeRunCard = runCard;
   try {
@@ -654,7 +723,7 @@ async function sendMessage(text, options = {}) {
   }
   finally {
     state.running = false; state.activeJobId = null; state.activeRunCard = null;
-    $('#send').disabled = false; $('#send').textContent = state.queuedDirections.length ? t('Queued') : t('Send'); $('#mode').disabled = false; updateComposerAvailability(); prompt.focus();
+    $('#send').disabled = false; $('#send').textContent = state.queuedDirections.length ? t('Queued') : t('Send'); $('#mode').disabled = false; $('#model').disabled = false; $('#settings-model').disabled = false; updateComposerAvailability(); prompt.focus();
     if (state.queuedDirections.length) setTimeout(drainDirections, 0);
   }
 }
@@ -835,6 +904,12 @@ $('#create-project').addEventListener('click', createProject);
 $('#refresh-git')?.addEventListener('click', refreshGitReview);
 $('#mode').addEventListener('click', () => { const modes = ['fast', 'balanced', 'deep']; state.mode = modes[(modes.indexOf(state.mode) + 1) % modes.length]; renderMode(); loadStatus(); });
 $('#settings-mode').addEventListener('click', () => $('#mode').click());
+$('#model').addEventListener('click', () => toggleModelMenu($('#model')));
+$('#settings-model').addEventListener('click', () => toggleModelMenu($('#settings-model')));
+document.addEventListener('click', event => {
+  const menu = $('#model-menu');
+  if (menu && !menu.hidden && !menu.contains(event.target) && event.target.id !== 'model' && event.target.id !== 'settings-model') menu.hidden = true;
+});
 $('#supervisor-toggle').addEventListener('click', async () => { try { await setSupervisorSettings({ enabled: !state.supervisor?.enabled }); } catch (error) { $('#supervisor-status').textContent = error.message; } });
 $('#supervisor-enabled').addEventListener('change', async event => { try { await setSupervisorSettings({ enabled: event.currentTarget.checked }); } catch (error) { event.currentTarget.checked = !event.currentTarget.checked; $('#supervisor-status').textContent = error.message; } });
 $('#supervisor-mode').addEventListener('change', async event => { try { await setSupervisorSettings({ mode: event.currentTarget.value }); } catch (error) { $('#supervisor-status').textContent = error.message; } });
@@ -886,6 +961,26 @@ window.addEventListener('qwen:locale-changed', () => {
   refreshThreads();
   refreshRecoveryJobs();
   loadStatus();
+  // Re-translate already-rendered run status cards in place. t() is idempotent:
+  // a key already resolved to another language falls back to itself.
+  $$('.run-status').forEach(card => {
+    ['.run-status-head > strong', '.run-state', '.run-live strong', '.run-approval strong'].forEach(selector => {
+      const el = card.querySelector(selector);
+      if (el) el.textContent = translateEventText(el.getAttribute('data-orig') || el.textContent);
+    });
+    const pause = card.querySelector('.run-pause');
+    if (pause) pause.textContent = t(pause.getAttribute('data-orig') || 'Pause');
+    const stop = card.querySelector('.run-stop');
+    if (stop) stop.textContent = t(stop.getAttribute('data-orig') || 'Stop');
+    const approve = card.querySelector('.approve');
+    if (approve) approve.textContent = t(approve.getAttribute('data-orig') || 'Approve once');
+    const deny = card.querySelector('.deny');
+    if (deny) deny.textContent = t(deny.getAttribute('data-orig') || 'Deny');
+    card.querySelectorAll('.run-event-title, .run-event-detail dt, .run-event-detail dd:not(.technical-value)').forEach(el => {
+      el.textContent = translateEventText(el.getAttribute('data-orig') || el.textContent);
+    });
+  });
 });
+loadModelOptions();
 loadStatus().then(() => refreshThreads(true));
 setInterval(loadStatus, 5000);
