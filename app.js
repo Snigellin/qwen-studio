@@ -5,7 +5,7 @@ const $$ = selector => [...document.querySelectorAll(selector)];
 const messages = $('#messages');
 const prompt = $('#prompt');
 const intro = $('#intro');
-const modeNames = { fast: t('Fast'), balanced: t('Balanced'), deep: t('Deep') };
+const modeKeys = { fast: 'Fast', balanced: 'Balanced', deep: 'Deep' };
 
 function showNotice(text, kind = 'error') {
   const notice = $('#app-notice'); if (!notice) return;
@@ -14,7 +14,7 @@ function showNotice(text, kind = 'error') {
 }
 
 function renderMode() {
-  const label = modeNames[state.mode] || modeNames.fast;
+  const label = t(modeKeys[state.mode] || modeKeys.fast);
   const context = Number(state.profiles?.[state.mode]?.num_ctx || ({ fast: 32768, balanced: 65536, deep: 131072 }[state.mode]));
   $('#mode').textContent = t('mode.label', { label, ctx: Math.round(context / 1024) });
   $('#settings-mode').textContent = label;
@@ -94,7 +94,7 @@ function renderSupervisor() {
   const available = Boolean(data.available);
   const checkbox = $('#supervisor-enabled');
   if (checkbox) { checkbox.checked = enabled; checkbox.disabled = !available; }
-  const label = $('#supervisor-toggle-label'); if (label) label.textContent = enabled ? 'Autopilot on' : 'Autopilot off';
+  const label = $('#supervisor-toggle-label'); if (label) label.textContent = enabled ? t('Autopilot on') : t('Autopilot off');
   $('#supervisor-toggle')?.classList.toggle('active', enabled);
   const status = $('#supervisor-status');
   if (status) {
@@ -663,8 +663,8 @@ function argsToLines(args = []) { return args.join('\n'); }
 function libraryItem(item) {
   const element = document.createElement('article');
   element.className = 'library-item';
-  const name = document.createElement('strong'); name.textContent = item.name;
-  const description = document.createElement('p'); description.textContent = item.description;
+  const name = document.createElement('strong'); name.textContent = t(item.name);
+  const description = document.createElement('p'); description.textContent = t(item.description);
   const button = document.createElement('button'); button.type = 'button'; button.textContent = t('Use template');
   element.append(name, description, button);
   button.addEventListener('click', () => {

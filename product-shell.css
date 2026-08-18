@@ -105,3 +105,16 @@
 /* Keep settings rows horizontal: the generic .settings-list div rule (flex) would otherwise override the two-column grid. */
 .settings-list .settings-group { display: grid; grid-template-columns: minmax(120px, 1fr) minmax(170px, 1.4fr); align-items: center; gap: 5px 14px; }
 .settings-group input#busy-processes { grid-column: 2; }
+/* MCP form: transport select matches the input/textarea look. */
+.mcp-form select { width: 100%; margin-top: 6px; border: 1px solid #dadade; border-radius: 6px; padding: 9px; outline: 0; font-size: 12px; background: #fff; color: #202123; }
+.mcp-form select:focus { border-color: #002fa7; }
+/* Unify every dropdown corner radius with the settings selects (6px). */
+select { border-radius: 6px; }
+.project-permission { border-radius: 6px; }
+/* Force every native select to the app's gray input look (border + 6px radius) regardless of specificity or cached builds. */
+.mcp-form select, .settings-group select, .project-permission, select {
+  border: 1px solid #dcdce0 !important;
+  border-radius: 6px !important;
+  background-color: #fff !important;
+  color: var(--q-ink, #202123) !important;
+}
