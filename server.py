@@ -195,6 +195,50 @@ def settings_file():
 def jobs_file():
     return DATA_DIR / "jobs.json"
 
+
+def atomic_write(path, text, encoding="utf-8"):
+    """Best-effort atomic file write.
+
+    Writes a '.tmp' sibling and replaces the target so a crash never leaves a
+    half-written JSON file. Packaged release builds can hit ERROR_ACCESS_DENIED
+    (WinError 5) on the replace step when the target is momentarily held open by
+    another reader (antivirus scan, a second app instance) or carries a
+    read-only attribute; those are cleared/retried here, with a direct write as
+    the final fallback. Persistence failures never raise, so they cannot crash a
+    running job or an API request.
+    """
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        temporary = path.with_suffix(".tmp")
+        try:
+            temporary.write_text(text, encoding=encoding)
+        except OSError:
+            # A leftover temp (e.g. from a crashed process) can block the write;
+            # clear it and retry once before falling back to a direct write.
+            try:
+                if temporary.is_dir(): shutil.rmtree(temporary)
+                else: temporary.unlink()
+            except OSError:
+                pass
+            temporary.write_text(text, encoding=encoding)
+        replaced = False
+        for attempt in range(4):
+            try:
+                temporary.replace(path)
+                replaced = True
+                break
+            except OSError:
+                try: os.chmod(path, 0o600)  # clear a read-only target
+                except OSError: pass
+                if attempt < 3: time.sleep(0.15 * (attempt + 1))
+        if not replaced:
+            path.write_text(text, encoding=encoding)
+        return True
+    except OSError as error:
+        try: print(f"[qwen] could not persist {path}: {error}", file=sys.stderr)
+        except Exception: pass
+        return False
+
 def load_runtime_settings():
     settings = dict(SUPERVISOR_DEFAULTS)
     try:
@@ -384,10 +428,7 @@ def load_thread_state():
 
 def save_thread_state(state):
     with THREADS_LOCK:
-        DATA_DIR.mkdir(parents=True, exist_ok=True)
-        temporary = THREADS_FILE.with_suffix(".tmp")
-        temporary.write_text(json.dumps(state, indent=2, ensure_ascii=False), encoding="utf-8")
-        temporary.replace(THREADS_FILE)
+        atomic_write(THREADS_FILE, json.dumps(state, indent=2, ensure_ascii=False))
 
 def thread_by_id(thread_id):
     return next((item for item in load_thread_state()["items"] if item.get("id") == thread_id), None)
@@ -491,10 +532,7 @@ def load_attachment_state():
 
 def save_attachment_state(state):
     with ATTACHMENTS_LOCK:
-        DATA_DIR.mkdir(parents=True, exist_ok=True)
-        temporary = ATTACHMENTS_FILE.with_suffix(".tmp")
-        temporary.write_text(json.dumps(state, indent=2, ensure_ascii=False), encoding="utf-8")
-        temporary.replace(ATTACHMENTS_FILE)
+        atomic_write(ATTACHMENTS_FILE, json.dumps(state, indent=2, ensure_ascii=False))
 
 def attachment_by_id(attachment_id):
     return next((item for item in load_attachment_state()["items"] if item.get("id") == attachment_id), None)
@@ -760,10 +798,7 @@ def persist_jobs():
             if job.get("_request") is not None: row["resumeRequest"] = job["_request"]
             rows.append(row)
     with JOB_PERSIST_LOCK:
-        DATA_DIR.mkdir(parents=True, exist_ok=True)
-        temporary = jobs_file().with_suffix(".tmp")
-        temporary.write_text(json.dumps({"version": 1, "items": rows[-100:]}, indent=2, ensure_ascii=False), encoding="utf-8")
-        temporary.replace(jobs_file())
+        atomic_write(jobs_file(), json.dumps({"version": 1, "items": rows[-100:]}, indent=2, ensure_ascii=False))
 
 def ensure_jobs_loaded():
     global JOBS_LOADED, JOBS_SOURCE
@@ -962,6 +997,34 @@ def record_model_step(job, result, profile, step):
         "Running totals": f"{job['metrics']['totalPromptTokens']:,} prompt · {job['metrics']['totalGeneratedTokens']:,} generated tokens",
     })
 
+def terminal_output_decoder():
+    """Return a bytes-to-str decoder for redirected terminal output.
+
+    Windows PowerShell 5.1 and native tools write redirected stdout in the
+    system console code page (GBK/cp936 on Chinese systems) rather than
+    UTF-8, so decoding with UTF-8 alone garbles localized output (e.g.
+    Chinese ``help`` text). Try strict UTF-8 first, then fall back to the
+    console code page.
+    """
+    fallback = "utf-8"
+    if os.name == "nt":
+        try:
+            import ctypes
+            codepage = ctypes.windll.kernel32.GetOEMCP()
+            if codepage and codepage != 65001:
+                fallback = f"cp{codepage}"
+        except Exception:
+            pass
+
+    def decode(raw):
+        try:
+            return raw.decode("utf-8")
+        except UnicodeDecodeError:
+            return raw.decode(fallback, errors="replace")
+
+    return decode
+
+
 def run_terminal_command(run_id, command, workspace):
     run = TERMINAL_RUNS[run_id]
     try:
@@ -970,20 +1033,17 @@ def run_terminal_command(run_id, command, workspace):
             cwd=workspace,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            bufsize=1,
             **process_options(new_session=True),
         )
         with TERMINAL_LOCK:
             run["process"] = process
             run["pid"] = process.pid
         lower_process_priority(process)
+        decode = terminal_output_decoder()
         with process.stdout:
-            for line in process.stdout:
+            for raw in iter(process.stdout.readline, b""):
                 with TERMINAL_LOCK:
-                    run["output"] = (run["output"] + line)[-100000:]
+                    run["output"] = (run["output"] + decode(raw))[-100000:]
                     run["updatedAt"] = time.time()
         exit_code = process.wait()
         with TERMINAL_LOCK:
