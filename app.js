@@ -18,7 +18,7 @@ function renderMode() {
   const context = Number(state.profiles?.[state.mode]?.num_ctx || ({ fast: 32768, balanced: 65536, deep: 131072 }[state.mode]));
   $('#mode').textContent = t('mode.label', { label, ctx: Math.round(context / 1024) });
   $('#settings-mode').textContent = label;
-  $('#settings-profile-context').textContent = `${context.toLocaleString()} tokens`;
+  $('#settings-profile-context').textContent = `${context.toLocaleString()} ${t('tokens')}`;
 }
 
 function showView(view) {
@@ -57,7 +57,7 @@ async function loadStatus() {
     $('#active-project-name').textContent = data.project?.name || t('No project');
     const capabilityNames = { completion: t('capabilities.completion'), vision: t('capabilities.vision'), tools: t('capabilities.tools'), thinking: t('capabilities.thinking') };
     $('#settings-capabilities').textContent = (data.runtime?.capabilities || []).map(name => capabilityNames[name] || name).join(', ') || t('Not reported');
-    $('#settings-native-context').textContent = data.runtime?.nativeContext ? `${Number(data.runtime.nativeContext).toLocaleString()} tokens` : 'Not reported';
+    $('#settings-native-context').textContent = data.runtime?.nativeContext ? `${Number(data.runtime.nativeContext).toLocaleString()} ${t('tokens')}` : t('Not reported');
     state.runtimeReady = Boolean(data.runtime?.available);
     const runtimeState = data.runtime?.state || (state.runtimeReady ? 'ready' : 'offline');
     const runtimeLabel = state.runtimeReady ? t('Local runtime ready') : runtimeState === 'model-missing' ? t('Model not installed') : t('Starting Ollama…');
