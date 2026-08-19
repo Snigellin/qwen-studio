@@ -43,6 +43,11 @@ function updateComposerAvailability() {
   send.title = state.runtimeReady ? '' : t('Waiting for Ollama and the selected model');
 }
 
+function updateSendLabel() {
+  const send = $('#send'); if (!send) return;
+  send.textContent = state.queuedDirections.length ? t('Queued') : (state.running ? t('Steer') : t('Send'));
+}
+
 async function loadStatus() {
   try {
     const data = await fetch('/api/status').then(r => r.json());
@@ -74,12 +79,33 @@ async function loadStatus() {
   } catch { state.runtimeReady = false; setConnected(false, t('Starting local backend…'), 'starting'); updateComposerAvailability(); }
 }
 
+const EVENT_TEMPLATES = [
+  { pattern: /^Looking inside (.+) to understand the folder structure\.$/, key: 'Looking inside {path} to understand the folder structure.', vars: ['path'] },
+  { pattern: /^Reading (.+) so Qwen can understand its current contents\.$/, key: 'Reading {path} so Qwen can understand its current contents.', vars: ['path'] },
+  { pattern: /^Saving generated code or content to (.+)\.$/, key: 'Saving generated code or content to {path}.', vars: ['path'] },
+  { pattern: /^Saved a recovery checkpoint: (.+)\.$/, key: 'Saved a recovery checkpoint: {label}.', vars: ['label'] },
+  { pattern: /^Tool action: (.+)$/, key: 'Tool action: {name}', vars: ['name'] },
+  { pattern: /^Qwen model step (.+)$/, key: 'Qwen model step {n}', vars: ['n'] },
+  { pattern: /^Using the (.+) tool\.$/, key: 'Using the {name} tool.', vars: ['name'] }
+];
+
 function translateEventText(text) {
-  const match = text.match(/^([\s\S]*?)(\d+(?:\.\d+)?)([\s\S]*)$/);
+  const match = text.match(/^([\s\S]*?)(\d[\d,]*(?:\.\d+)?)([\s\S]*)$/);
   if (match) {
     const templated = match[1] + '{n}' + match[3];
     const base = t(templated);
     if (base !== templated) return base.split('{n}').join(match[2]);
+  }
+  for (const rule of EVENT_TEMPLATES) {
+    const captures = text.match(rule.pattern);
+    if (!captures) continue;
+    const base = t(rule.key);
+    if (base === rule.key) continue;
+    let translated = base;
+    rule.vars.forEach((name, index) => {
+      translated = translated.split('{' + name + '}').join(translateEventText(captures[index + 1]));
+    });
+    return translated;
   }
   return t(text);
 }
@@ -204,14 +230,14 @@ async function refreshRecoveryJobs() {
 async function resumeJob(job) {
   if (state.running) return;
   if (job.threadId) await openThread(job.threadId);
-  state.running = true; state.activeJobId = job.id; $('#send').disabled = false; $('#send').textContent = t('Steer'); $('#mode').disabled = true; $('#model').disabled = true; $('#settings-model').disabled = true;
+  state.running = true; state.activeJobId = job.id; $('#send').disabled = false; updateSendLabel(); $('#mode').disabled = true; $('#model').disabled = true; $('#settings-model').disabled = true;
   const card = addRunStatus(); state.activeRunCard = card;
   try {
     const response = await fetch(`/api/jobs/${job.id}/resume`, { method: 'POST' }); const data = await response.json();
     if (!response.ok) throw new Error(data.error || t('The job could not be resumed.'));
     await watchJob(data.jobId || job.id, card); await refreshThreads();
   } catch (error) { finishRunCard(card, 'Stopped', true); addMessage('assistant', t('Resume error:') + ' ' + error.message); }
-  finally { state.running = false; state.activeJobId = null; state.activeRunCard = null; $('#send').disabled = false; $('#send').textContent = t('Send'); $('#mode').disabled = false; $('#model').disabled = false; $('#settings-model').disabled = false; renderSupervisor(); refreshRecoveryJobs(); }
+  finally { state.running = false; state.activeJobId = null; state.activeRunCard = null; $('#send').disabled = false; updateSendLabel(); $('#mode').disabled = false; $('#model').disabled = false; $('#settings-model').disabled = false; renderSupervisor(); refreshRecoveryJobs(); }
 }
 
 function clearThreadSurface() {
@@ -663,7 +689,7 @@ async function queueDirection(text) {
   const element = addMessage('user', content, attachments, t('Queued to steer the active run'));
   state.queuedDirections.push({ text: content, attachments, element });
   if (state.activeRunCard) appendRunEvent(state.activeRunCard, { kind: 'steer', text: t('New direction received:') + ' ' + content, detail: { Queue: `${state.queuedDirections.length} message${state.queuedDirections.length === 1 ? '' : 's'} waiting`, Action: t('Stopping the current model turn, then continuing with this direction') } });
-  $('#send').textContent = t('Queued');
+  updateSendLabel();
   if (!state.steering && state.activeJobId) {
     state.steering = true;
     await fetch(`/api/jobs/${state.activeJobId}`, { method: 'DELETE' });
@@ -691,7 +717,7 @@ async function sendMessage(text, options = {}) {
   state.history.push({ role: 'user', content: outgoingText, attachments: outgoingAttachments });
   if (!options.alreadyRendered) addMessage('user', outgoingText, outgoingAttachments);
   $('#send').disabled = false;
-  $('#send').textContent = t('Steer');
+  updateSendLabel();
   $('#mode').disabled = true;
   $('#model').disabled = true;
   $('#settings-model').disabled = true;
@@ -725,7 +751,7 @@ async function sendMessage(text, options = {}) {
   }
   finally {
     state.running = false; state.activeJobId = null; state.activeRunCard = null;
-    $('#send').disabled = false; $('#send').textContent = state.queuedDirections.length ? t('Queued') : t('Send'); $('#mode').disabled = false; $('#model').disabled = false; $('#settings-model').disabled = false; updateComposerAvailability(); prompt.focus();
+    $('#send').disabled = false; updateSendLabel(); $('#mode').disabled = false; $('#model').disabled = false; $('#settings-model').disabled = false; updateComposerAvailability(); prompt.focus();
     if (state.queuedDirections.length) setTimeout(drainDirections, 0);
   }
 }
@@ -978,6 +1004,7 @@ document.addEventListener('keydown', event => {
   if (event.ctrlKey && event.key === '`') { event.preventDefault(); toggleTerminal(); }
 });
 window.addEventListener('qwen:locale-changed', () => {
+  updateSendLabel();
   renderMode();
   renderSupervisor();
   showView(state.currentView);
