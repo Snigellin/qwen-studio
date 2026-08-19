@@ -144,5 +144,7 @@
   cursor: pointer;
 }
 select:hover { background-color: rgba(0, 0, 0, .06) !important; }
+/* Permission dialog: compact hint text inside the shared MCP-style form. */
+.mcp-form .muted { margin: 2px 0 4px; }
 select:disabled { cursor: not-allowed; opacity: .55; }
 select:focus-visible { outline: 2px solid var(--q-accent, #2457e6); outline-offset: 1px; }

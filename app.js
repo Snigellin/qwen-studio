@@ -23,6 +23,7 @@ function renderMode() {
 
 function showView(view) {
   state.currentView = view;
+  const permissionForm = $('#permission-form'); if (permissionForm) permissionForm.hidden = true;
   $$('.view').forEach(item => item.classList.toggle('active', item.id === `${view}-view`));
   $$('.nav-link[data-view]').forEach(item => item.classList.toggle('active', item.dataset.view === view));
   $('#breadcrumb').textContent = view === 'mcps' ? t('MCP connections') : view === 'workspace' ? t('Projects') : view === 'settings' ? t('Settings') : t('Chats');
@@ -166,6 +167,7 @@ function renderSupervisor() {
   const mode = $('#supervisor-mode'); if (mode && data.mode) mode.value = data.mode;
   const budget = $('#supervisor-budget'); if (budget && data.dailyBudgetUsd != null) budget.value = data.dailyBudgetUsd;
   const permission = $('#permission-profile'); if (permission && data.permissionProfile) permission.value = data.permissionProfile;
+  const dialogPermission = $('#permission-dialog-profile'); if (dialogPermission && data.permissionProfile) dialogPermission.value = data.permissionProfile;
   const lowResource = $('#low-resource'); if (lowResource) lowResource.checked = Boolean(data.lowResource);
   const outputTokens = $('#output-tokens'); if (outputTokens && data.outputTokens != null) outputTokens.value = data.outputTokens;
   const idleOnly = $('#idle-only'); if (idleOnly) idleOnly.checked = Boolean(data.idleOnly);
@@ -915,6 +917,27 @@ $('#supervisor-enabled').addEventListener('change', async event => { try { await
 $('#supervisor-mode').addEventListener('change', async event => { try { await setSupervisorSettings({ mode: event.currentTarget.value }); } catch (error) { $('#supervisor-status').textContent = error.message; } });
 $('#supervisor-budget').addEventListener('change', async event => { try { await setSupervisorSettings({ dailyBudgetUsd: Number(event.currentTarget.value) }); } catch (error) { $('#supervisor-status').textContent = error.message; } });
 $('#permission-profile').addEventListener('change', async event => { try { await setSupervisorSettings({ permissionProfile: event.currentTarget.value }); } catch (error) { $('#supervisor-status').textContent = error.message; } });
+function positionPermissionForm() {
+  const button = $('#permission-config'); const form = $('#permission-form');
+  if (!button || !form) return;
+  const rect = button.getBoundingClientRect();
+  form.style.right = 'auto';
+  form.style.top = 'auto';
+  form.style.left = `${Math.max(8, Math.min(rect.left, window.innerWidth - form.offsetWidth - 8))}px`;
+  form.style.bottom = `${Math.max(8, window.innerHeight - rect.top + 6)}px`;
+}
+$('#permission-config').addEventListener('click', event => {
+  event.stopPropagation();
+  const form = $('#permission-form');
+  if (form.hidden) { form.hidden = false; positionPermissionForm(); } else { form.hidden = true; }
+});
+document.addEventListener('click', event => {
+  const form = $('#permission-form');
+  if (form && !form.hidden && !form.contains(event.target) && event.target.id !== 'permission-config') form.hidden = true;
+});
+window.addEventListener('resize', () => { const form = $('#permission-form'); if (form && !form.hidden) positionPermissionForm(); });
+document.addEventListener('keydown', event => { if (event.key === 'Escape') { const form = $('#permission-form'); if (form && !form.hidden) form.hidden = true; } });
+$('#permission-dialog-profile').addEventListener('change', async event => { try { await setSupervisorSettings({ permissionProfile: event.currentTarget.value }); showNotice(t('Permission profile saved.'), 'success'); } catch (error) { showNotice(error.message); } });
 $('#low-resource').addEventListener('change', async event => { try { await setSupervisorSettings({ lowResource: event.currentTarget.checked }); } catch (error) { event.currentTarget.checked = !event.currentTarget.checked; $('#supervisor-status').textContent = error.message; } });
 $('#output-tokens').addEventListener('change', async event => { try { const value = Number(event.currentTarget.value); if (!Number.isInteger(value) || value < -1) throw new Error(t('Use -1 for unlimited or a positive whole-number token cap.')); await setSupervisorSettings({ outputTokens: value }); } catch (error) { $('#supervisor-status').textContent = error.message; loadStatus(); } });
 $('#terminal-toggle').addEventListener('click', () => toggleTerminal());
